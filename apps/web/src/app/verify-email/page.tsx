@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { AuthShell } from "@/components/auth/auth-shell";
-import styles from "@/components/auth/auth-form.module.css";
+import { VerifyEmailPanel } from "@/components/auth/verify-email-panel";
 
 export const metadata: Metadata = {
   title: "Verify your email",
@@ -18,15 +18,7 @@ export default function VerifyEmailPage() {
         { label: "Need an account? Sign up", href: "/sign-up" },
       ]}
     >
-      <div className={styles.submitRow}>
-        <button className={styles.submit} type="button" disabled>
-          Connecting secure account service…
-        </button>
-        <p className={styles.disabledNote}>
-          We are still connecting the secure account service. Resending a
-          verification email will open once it is ready.
-        </p>
-      </div>
+      <VerifyEmailPanel />
     </AuthShell>
   );
 }

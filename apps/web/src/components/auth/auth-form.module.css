@@ -149,11 +149,24 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   box-shadow: 5px 5px 0 var(--orange);
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+}
+
+.submit:hover:not(:disabled),
+.submitLink:hover {
+  transform: translate(2px, 2px);
+  box-shadow: 3px 3px 0 var(--orange);
+}
+
+.submit:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-.submit:focus-visible {
+.submit:focus-visible,
+.submitLink:focus-visible,
+.inlineLink:focus-visible {
   outline: 3px solid var(--orange);
   outline-offset: 4px;
 }
@@ -163,6 +176,93 @@
   color: var(--muted);
   font-size: 0.78rem;
   line-height: 1.55;
+}
+
+.status,
+.success,
+.error {
+  margin: 0;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.status {
+  background: rgba(19, 18, 15, 0.04);
+  color: var(--muted);
+}
+
+.success {
+  border-color: #34704b;
+  background: #e2f0e5;
+  color: #234d34;
+}
+
+.error {
+  border-color: #a43f32;
+  background: #f7e2dd;
+  color: #762c22;
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.submitLink {
+  display: inline-flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: white;
+  padding: 0 26px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-align: center;
+  text-transform: uppercase;
+  box-shadow: 5px 5px 0 var(--orange);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.inlineLink {
+  align-self: flex-start;
+  border-bottom: 1px solid var(--ink);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.accountDetails {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+}
+
+.accountDetails div {
+  display: grid;
+  grid-template-columns: minmax(80px, 0.35fr) 1fr;
+  gap: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.accountDetails dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.accountDetails dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
 }
 
 .footerLinks {

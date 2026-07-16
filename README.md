@@ -33,7 +33,10 @@ Web, in a separate terminal:
 npm --prefix apps/web run dev
 ```
 
-The web application is available at `http://localhost:3000`; API health endpoints are at `http://localhost:8000/health/live` and `/health/ready`.
+The web application is available at `http://localhost:3000`. Next.js proxies browser
+requests under `/api/v1` to `http://127.0.0.1:8000` by default so session cookies stay
+same-origin. Set `API_INTERNAL_URL` for a different private API address. API health
+endpoints are at `http://localhost:8000/health/live` and `/health/ready`.
 
 ## Database migrations
 
@@ -52,6 +55,7 @@ Set `XXX_DATABASE_URL` to the deployment PostgreSQL URL before running the same 
 .venv313/bin/mypy services/api/src
 .venv313/bin/pytest services/api/tests
 npm --prefix apps/web run lint
+npm --prefix apps/web run test
 npm --prefix apps/web run typecheck
 npm --prefix apps/web run build
 ```
