@@ -20,6 +20,7 @@ from xxx_api.services.auth import (
     InvalidSessionError,
     authenticate_access_principal,
 )
+from xxx_api.storage import ObjectStorage
 
 DatabaseSession = Annotated[AsyncSession, Depends(get_session)]
 
@@ -37,6 +38,11 @@ def get_email_sender(request: Request) -> EmailSender:
 def get_rate_limiter(request: Request) -> RateLimiter:
     """Return the application-lifetime distributed rate limiter."""
     return request.app.state.rate_limiter
+
+
+def get_object_storage(request: Request) -> ObjectStorage:
+    """Return the process-owned private object-storage adapter."""
+    return request.app.state.object_storage
 
 
 def require_trusted_origin(

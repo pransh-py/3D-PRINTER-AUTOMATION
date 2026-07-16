@@ -29,6 +29,9 @@ def test_production_accepts_https_origin() -> None:
         jwt_signing_secret="production-jwt-signing-secret-1234567890",
         token_hash_secret="production-token-hash-secret-0987654321",
         mfa_encryption_secret="production-mfa-encryption-secret-2468135790",
+        storage_endpoint_url="https://storage.example.org",
+        storage_access_key="production-storage-access",
+        storage_secret_key="production-storage-secret",
         public_web_url="https://example.com",
         email_sender_address="no-reply@example.org",
         smtp_host="smtp.example.org",
@@ -108,9 +111,32 @@ def test_production_rejects_local_email_transport() -> None:
             jwt_signing_secret="production-jwt-signing-secret-1234567890",
             token_hash_secret="production-token-hash-secret-0987654321",
             mfa_encryption_secret="production-mfa-encryption-secret-2468135790",
+            storage_endpoint_url="https://storage.example.org",
+            storage_access_key="production-storage-access",
+            storage_secret_key="production-storage-secret",
             public_web_url="https://example.com",
             email_sender_address="no-reply@example.org",
         )
+
+
+def test_production_rejects_insecure_or_default_object_storage() -> None:
+    common = {
+        "environment": "production",
+        "allowed_origins": ["https://example.com"],
+        "secure_cookies": True,
+        "jwt_signing_secret": "production-jwt-signing-secret-1234567890",
+        "token_hash_secret": "production-token-hash-secret-0987654321",
+        "mfa_encryption_secret": "production-mfa-encryption-secret-2468135790",
+        "public_web_url": "https://example.com",
+        "email_sender_address": "no-reply@example.org",
+        "smtp_host": "smtp.example.org",
+        "smtp_port": 587,
+        "smtp_starttls": True,
+    }
+    with pytest.raises(ValidationError, match="storage endpoint must use HTTPS"):
+        Settings(**common)
+    with pytest.raises(ValidationError, match="object-storage credentials"):
+        Settings(**common, storage_endpoint_url="https://storage.example.org")
 
 
 def test_smtp_tls_modes_are_mutually_exclusive() -> None:

@@ -40,3 +40,8 @@ class AuditEventType(StrEnum):
     OWNER_MFA_ENROLLMENT_STARTED = "identity.owner_mfa_enrollment_started"
     OWNER_MFA_ENABLED = "identity.owner_mfa_enabled"
     OWNER_MFA_RESET = "identity.owner_mfa_reset"
+    QUOTE_REQUEST_CREATED = "quote.request_created"
+    MODEL_UPLOAD_ISSUED = "quote.model_upload_issued"
+    MODEL_UPLOAD_COMPLETED = "quote.model_upload_completed"
+    MODEL_UPLOAD_REJECTED = "quote.model_upload_rejected"
+    QUOTE_REQUEST_SUBMITTED = "quote.request_submitted"

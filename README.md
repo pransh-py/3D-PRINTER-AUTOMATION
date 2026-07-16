@@ -21,6 +21,18 @@ python3.13 -m venv .venv313
 
 ## Run locally
 
+Start the pinned development dependencies when Docker is available:
+
+```sh
+docker compose up -d
+```
+
+This starts PostgreSQL, Redis, private MinIO storage, and Mailpit. MinIO serves its S3 API
+at `http://127.0.0.1:9000` and its console at `http://127.0.0.1:9001`; Mailpit is at
+`http://127.0.0.1:8025`. The initialization container creates a non-public, versioned
+`xxx-private-models` bucket with development-only browser CORS. Never reuse the committed
+development credentials in staging or production.
+
 API:
 
 ```sh

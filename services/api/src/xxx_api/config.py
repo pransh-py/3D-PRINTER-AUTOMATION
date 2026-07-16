@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     max_active_sessions_per_user: int = Field(default=10, ge=1, le=50)
     redis_url: str = "redis://127.0.0.1:6379/0"
     redis_socket_timeout_seconds: float = Field(default=1.0, gt=0, le=5)
+    storage_endpoint_url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:9000")
+    storage_region: str = Field(default="us-east-1", min_length=1, max_length=64)
+    storage_bucket: str = Field(
+        default="xxx-private-models",
+        pattern=r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$",
+    )
+    storage_access_key: SecretStr = SecretStr("development-minio")
+    storage_secret_key: SecretStr = SecretStr("development-minio-secret")
+    upload_url_ttl_seconds: int = Field(default=600, ge=120, le=1800)
+    max_model_file_bytes: int = Field(default=100 * 1024 * 1024, ge=1024, le=500 * 1024 * 1024)
+    max_models_per_quote: int = Field(default=5, ge=1, le=10)
     public_web_url: AnyHttpUrl = AnyHttpUrl("http://localhost:3000")
     email_sender_address: EmailStr = cast(EmailStr, "no-reply@example.com")
     email_sender_name: str = "xxx"
@@ -68,6 +79,8 @@ class Settings(BaseSettings):
             jwt_secret = self.jwt_signing_secret.get_secret_value()
             token_secret = self.token_hash_secret.get_secret_value()
             mfa_secret = self.mfa_encryption_secret.get_secret_value()
+            storage_access_key = self.storage_access_key.get_secret_value()
+            storage_secret_key = self.storage_secret_key.get_secret_value()
             if self.debug:
                 raise ValueError("debug must be disabled in production")
             if "*" in self.allowed_origins:
@@ -89,6 +102,12 @@ class Settings(BaseSettings):
                 raise ValueError("authentication secrets must be distinct")
             if self.public_web_url.scheme != "https":
                 raise ValueError("production public web URL must use HTTPS")
+            if self.storage_endpoint_url.scheme != "https":
+                raise ValueError("production storage endpoint must use HTTPS")
+            if storage_access_key.startswith("development-") or storage_secret_key.startswith(
+                "development-"
+            ):
+                raise ValueError("production object-storage credentials are not configured")
             if self.email_sender_address == "no-reply@example.com":
                 raise ValueError("production email sender address is not configured")
             if self.smtp_host in {"127.0.0.1", "localhost"} and self.smtp_port == 1025:

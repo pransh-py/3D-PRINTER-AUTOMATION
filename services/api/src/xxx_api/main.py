@@ -16,6 +16,8 @@ from xxx_api.logging import configure_logging
 from xxx_api.rate_limit import RedisRateLimiter
 from xxx_api.routes.auth import router as auth_router
 from xxx_api.routes.health import router as health_router
+from xxx_api.routes.quotes import router as quotes_router
+from xxx_api.storage import S3ObjectStorage
 
 
 @asynccontextmanager
@@ -23,6 +25,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Release shared network and database resources on process shutdown."""
     yield
     await app.state.redis.aclose()
+    app.state.object_storage.close()
     await app.state.database_engine.dispose()
 
 
@@ -51,6 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.redis = redis_client
     app.state.rate_limiter = RedisRateLimiter(redis_client, runtime_settings)
     app.state.email_sender = SmtpEmailSender(runtime_settings)
+    app.state.object_storage = S3ObjectStorage(runtime_settings)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(AuthResponseSecurityMiddleware)
     app.add_middleware(
@@ -61,6 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Request-ID"],
     )
     app.include_router(auth_router, prefix=runtime_settings.api_prefix)
+    app.include_router(quotes_router, prefix=runtime_settings.api_prefix)
     app.include_router(health_router)
     return app
 

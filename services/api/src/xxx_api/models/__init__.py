@@ -9,13 +9,16 @@ from xxx_api.models.identity import (
     RefreshSession,
     User,
 )
+from xxx_api.models.quotes import ModelAsset, QuoteRequest
 
 __all__ = [
     "AuditEvent",
     "Base",
     "MfaMethod",
     "MfaRecoveryCode",
+    "ModelAsset",
     "OneTimeToken",
+    "QuoteRequest",
     "RefreshSession",
     "User",
 ]
