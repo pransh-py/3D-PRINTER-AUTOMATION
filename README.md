@@ -35,6 +35,16 @@ npm --prefix apps/web run dev
 
 The web application is available at `http://localhost:3000`; API health endpoints are at `http://localhost:8000/health/live` and `/health/ready`.
 
+## Database migrations
+
+The API defaults to a local SQLite database for development. Apply reviewed migrations from the repository root with:
+
+```sh
+.venv313/bin/alembic -c services/api/alembic.ini upgrade head
+```
+
+Set `XXX_DATABASE_URL` to the deployment PostgreSQL URL before running the same command outside local development.
+
 ## Verify
 
 ```sh

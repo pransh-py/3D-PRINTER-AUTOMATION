@@ -8,8 +8,15 @@ version = "0.1.0"
 description = "API for the xxx 3D-printing ordering and operations platform"
 requires-python = ">=3.13"
 dependencies = [
+  "aiosqlite>=0.21,<1",
+  "alembic>=1.18,<2",
+  "email-validator>=2.2,<3",
   "fastapi>=0.115,<1",
+  "psycopg[binary,pool]>=3.2,<4",
+  "pwdlib[argon2]>=0.3,<1",
+  "pyjwt[crypto]>=2.10,<3",
   "pydantic-settings>=2.7,<3",
+  "sqlalchemy[asyncio]>=2.0.51,<2.1",
   "uvicorn[standard]>=0.34,<1",
 ]
 

@@ -1,0 +1,199 @@
+.shell {
+  min-height: 100vh;
+  padding: 36px max(24px, calc((100vw - 1100px) / 2));
+  background:
+    linear-gradient(90deg, transparent 49.9%, rgba(19, 18, 15, 0.06) 50%, transparent 50.1%),
+    var(--paper);
+}
+
+.wordmark {
+  font-size: 1.65rem;
+  font-weight: 900;
+  letter-spacing: -0.08em;
+}
+
+.wordmark span {
+  color: var(--orange);
+}
+
+.card {
+  width: min(560px, 100%);
+  margin: 12vh auto 0;
+  padding: clamp(32px, 6vw, 64px);
+  border: 1px solid var(--ink);
+  background: rgba(242, 238, 229, 0.92);
+  box-shadow: 12px 12px 0 var(--orange);
+}
+
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--orange);
+  font-size: 0.75rem;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+}
+
+.kicker::before {
+  width: 28px;
+  height: 2px;
+  content: "";
+  background: currentColor;
+}
+
+.title {
+  margin: 18px 0;
+  font-size: clamp(2.4rem, 5.5vw, 3.6rem);
+  line-height: 0.98;
+  letter-spacing: -0.05em;
+  text-transform: uppercase;
+}
+
+.description {
+  margin: 0 0 34px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.input {
+  min-height: 52px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.input::placeholder {
+  color: var(--muted);
+}
+
+.input:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: 2px;
+}
+
+.help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.checkboxField {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.checkboxInput {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  accent-color: var(--orange);
+}
+
+.checkboxInput:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: 2px;
+}
+
+.checkboxLabel {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.submitRow {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.submit {
+  display: inline-flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: white;
+  padding: 0 26px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  box-shadow: 5px 5px 0 var(--orange);
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.submit:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: 4px;
+}
+
+.disabledNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.footerLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.footerLink {
+  border-bottom: 1px solid transparent;
+  transition: border-color 160ms ease, color 160ms ease;
+}
+
+.footerLink:hover {
+  color: var(--orange);
+  border-color: var(--orange);
+}
+
+.footerLink:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: 4px;
+}
+
+@media (max-width: 720px) {
+  .card {
+    margin-top: 6vh;
+  }
+}

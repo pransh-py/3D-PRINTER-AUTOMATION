@@ -28,7 +28,15 @@ def test_unsafe_request_id_is_replaced() -> None:
 
 def test_production_disables_interactive_docs() -> None:
     client = TestClient(
-        create_app(Settings(environment="production", allowed_origins=["https://example.com"]))
+        create_app(
+            Settings(
+                environment="production",
+                allowed_origins=["https://example.com"],
+                secure_cookies=True,
+                jwt_signing_secret="production-jwt-signing-secret-1234567890",
+                token_hash_secret="production-token-hash-secret-0987654321",
+            )
+        )
     )
 
     assert client.get("/docs").status_code == 404
