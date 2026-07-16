@@ -1,0 +1,4 @@
+interface:
+  display_name: "Delegate to Sonnet 5"
+  short_description: "Run bounded Claude Sonnet 5 executor tasks"
+  default_prompt: "Use $delegate-sonnet to delegate this bounded repository task to Claude Sonnet 5."
