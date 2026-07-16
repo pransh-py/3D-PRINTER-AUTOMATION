@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     )
     access_token_ttl_seconds: int = Field(default=900, ge=300, le=3600)
     refresh_token_ttl_days: int = Field(default=30, ge=1, le=90)
+    max_active_sessions_per_user: int = Field(default=10, ge=1, le=50)
     email_verification_ttl_hours: int = Field(default=24, ge=1, le=72)
     password_reset_ttl_minutes: int = Field(default=30, ge=10, le=60)
     secure_cookies: bool = False

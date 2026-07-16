@@ -36,6 +36,7 @@ def test_access_token_round_trip() -> None:
     assert claims.user_id == user_id
     assert claims.session_id == session_id
     assert claims.role is Role.BUYER
+    assert claims.issued_at.timestamp() == int(now.timestamp())
     assert claims.expires_at.timestamp() == int(now.timestamp()) + 900
 
 
@@ -64,8 +65,11 @@ def test_opaque_token_digest_is_keyed_and_verifiable() -> None:
 
 
 def test_csrf_token_requires_exact_non_empty_match() -> None:
-    token = issue_csrf_token()
+    settings = Settings(environment="test")
+    session_id = uuid4()
+    token = issue_csrf_token(session_id, settings)
 
-    assert verify_csrf_token(token, token)
-    assert not verify_csrf_token(token, f"{token}x")
-    assert not verify_csrf_token("", "")
+    assert verify_csrf_token(token, token, session_id, settings)
+    assert not verify_csrf_token(token, f"{token}x", session_id, settings)
+    assert not verify_csrf_token(token, token, uuid4(), settings)
+    assert not verify_csrf_token("", "", session_id, settings)

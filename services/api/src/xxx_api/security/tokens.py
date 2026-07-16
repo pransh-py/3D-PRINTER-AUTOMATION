@@ -38,6 +38,7 @@ class AccessTokenClaims:
     session_id: UUID
     role: Role
     jwt_id: UUID
+    issued_at: datetime
     expires_at: datetime
 
 
@@ -97,6 +98,7 @@ def decode_access_token(token: str, settings: Settings) -> AccessTokenClaims:
             session_id=UUID(payload["sid"]),
             role=Role(payload["role"]),
             jwt_id=UUID(payload["jti"]),
+            issued_at=datetime.fromtimestamp(payload["iat"], tz=UTC),
             expires_at=datetime.fromtimestamp(payload["exp"], tz=UTC),
         )
     except (InvalidTokenError, KeyError, TypeError, ValueError) as error:
@@ -124,11 +126,27 @@ def verify_opaque_token(raw_token: str, expected_digest: str, settings: Settings
     return compare_digest(actual_digest, expected_digest)
 
 
-def issue_csrf_token() -> str:
-    """Generate an independent anti-forgery token."""
-    return token_urlsafe(32)
+def issue_csrf_token(session_id: UUID, settings: Settings) -> str:
+    """Generate a signed double-submit token bound to one authenticated session."""
+    nonce = token_urlsafe(32)
+    signature = digest_opaque_token(f"csrf:{session_id}:{nonce}", settings)
+    return f"{nonce}.{signature}"
 
 
-def verify_csrf_token(cookie_value: str, header_value: str) -> bool:
-    """Require non-empty, constant-time equality for double-submit CSRF tokens."""
-    return bool(cookie_value and header_value) and compare_digest(cookie_value, header_value)
+def verify_csrf_token(
+    cookie_value: str,
+    header_value: str,
+    session_id: UUID,
+    settings: Settings,
+) -> bool:
+    """Verify equality, structure, signature, and authenticated-session binding."""
+    if not cookie_value or not header_value or not compare_digest(cookie_value, header_value):
+        return False
+    try:
+        nonce, supplied_signature = cookie_value.split(".", maxsplit=1)
+    except ValueError:
+        return False
+    if not nonce or not supplied_signature:
+        return False
+    expected_signature = digest_opaque_token(f"csrf:{session_id}:{nonce}", settings)
+    return compare_digest(supplied_signature, expected_signature)
