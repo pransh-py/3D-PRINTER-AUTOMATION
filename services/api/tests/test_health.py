@@ -72,6 +72,7 @@ def test_production_disables_interactive_docs() -> None:
                 secure_cookies=True,
                 jwt_signing_secret="production-jwt-signing-secret-1234567890",
                 token_hash_secret="production-token-hash-secret-0987654321",
+                mfa_encryption_secret="production-mfa-encryption-secret-2468135790",
                 public_web_url="https://example.com",
                 email_sender_address="no-reply@example.org",
                 smtp_host="smtp.example.org",

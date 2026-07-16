@@ -10,6 +10,8 @@ from xxx_api.config import Settings
 from xxx_api.dependencies import (
     CurrentUser,
     DatabaseSession,
+    OwnerPrincipal,
+    SessionCsrf,
     get_email_sender,
     get_rate_limiter,
     get_runtime_settings,
@@ -27,6 +29,13 @@ from xxx_api.schemas.auth import (
     EmailRequest,
     LoginRequest,
     MessageResponse,
+    MfaChallengeResponse,
+    MfaLoginRequest,
+    OwnerMfaConfirmationRequest,
+    OwnerMfaConfirmationResponse,
+    OwnerMfaEnrollmentRequest,
+    OwnerMfaEnrollmentResponse,
+    OwnerMfaStatusResponse,
     RegisterRequest,
     ResetPasswordRequest,
     TokenRequest,
@@ -42,6 +51,7 @@ from xxx_api.services.auth import (
     InvalidCsrfTokenError,
     InvalidOneTimeTokenError,
     InvalidSessionError,
+    MfaChallengeIssue,
     RefreshTokenReuseError,
     VerificationRequiredError,
     issue_email_verification,
@@ -53,6 +63,17 @@ from xxx_api.services.auth import (
     rotate_refresh_token,
     verify_email,
 )
+from xxx_api.services.owner_security import (
+    InvalidMfaCodeError,
+    InvalidOwnerPasswordError,
+    MfaAlreadyEnabledError,
+    MfaConfigurationError,
+    MfaEnrollmentRequiredError,
+    complete_owner_mfa_login,
+    confirm_owner_mfa_enrollment,
+    owner_mfa_enabled,
+    start_owner_mfa_enrollment,
+)
 
 router = APIRouter(prefix="/auth", tags=["identity"])
 logger = logging.getLogger("xxx_api.identity")
@@ -62,6 +83,11 @@ EmailAdapter = Annotated[EmailSender, Depends(get_email_sender)]
 Limiter = Annotated[RateLimiter, Depends(get_rate_limiter)]
 
 GENERIC_ACCOUNT_MESSAGE = "If the account is eligible, instructions will be sent."
+
+
+def _request_id(request: Request) -> str | None:
+    value = getattr(request.state, "request_id", None)
+    return value if isinstance(value, str) else None
 
 
 def _client_identifier(request: Request) -> str:
@@ -137,6 +163,7 @@ async def register(
         email=email,
         display_name=payload.display_name,
         password=payload.password,
+        request_id=_request_id(request),
     )
     if issue is not None:
         try:
@@ -184,7 +211,12 @@ async def activate_email(
     """Consume a one-time verification token without accepting it in a URL log."""
     await _enforce(limiter, "verify-email", _token_rules(request, payload.token))
     try:
-        await verify_email(session, settings, raw_token=payload.token)
+        await verify_email(
+            session,
+            settings,
+            raw_token=payload.token,
+            request_id=_request_id(request),
+        )
     except InvalidOneTimeTokenError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -193,7 +225,16 @@ async def activate_email(
     return MessageResponse(message="Email verified")
 
 
-@router.post("/login", response_model=AuthenticatedUserResponse)
+@router.post(
+    "/login",
+    response_model=AuthenticatedUserResponse,
+    responses={
+        status.HTTP_202_ACCEPTED: {
+            "model": MfaChallengeResponse,
+            "description": "Owner password accepted; MFA challenge required",
+        }
+    },
+)
 async def create_session(
     payload: LoginRequest,
     request: Request,
@@ -202,7 +243,7 @@ async def create_session(
     session: DatabaseSession,
     settings: RuntimeSettings,
     limiter: Limiter,
-) -> AuthenticatedUserResponse:
+) -> AuthenticatedUserResponse | JSONResponse:
     """Authenticate credentials and place bearer values only in cookies."""
     email = normalize_email(str(payload.email))
     await _enforce(limiter, "login", _email_rules(request, email, email_limit=5))
@@ -213,6 +254,7 @@ async def create_session(
             email=email,
             password=payload.password,
             user_agent=request.headers.get("User-Agent"),
+            request_id=_request_id(request),
         )
     except InvalidCredentialsError as error:
         raise HTTPException(
@@ -223,6 +265,52 @@ async def create_session(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email verification required",
+        ) from error
+    if isinstance(issue, MfaChallengeIssue):
+        challenge_response = MfaChallengeResponse(challenge=issue.challenge)
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content=challenge_response.model_dump(by_alias=True),
+        )
+    set_session_cookies(response, issue, settings)
+    return AuthenticatedUserResponse(
+        id=issue.user_id,
+        email=issue.email,
+        displayName=issue.display_name,
+        role=issue.role,
+    )
+
+
+@router.post("/login/mfa", response_model=AuthenticatedUserResponse)
+async def complete_mfa_session(
+    payload: MfaLoginRequest,
+    request: Request,
+    response: Response,
+    _origin: TrustedOrigin,
+    session: DatabaseSession,
+    settings: RuntimeSettings,
+    limiter: Limiter,
+) -> AuthenticatedUserResponse:
+    """Complete an owner login challenge before issuing any session cookies."""
+    await _enforce(limiter, "login-mfa", _token_rules(request, payload.challenge))
+    try:
+        issue = await complete_owner_mfa_login(
+            session,
+            settings,
+            challenge=payload.challenge,
+            code=payload.code,
+            user_agent=request.headers.get("User-Agent"),
+            request_id=_request_id(request),
+        )
+    except InvalidMfaCodeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired MFA challenge",
+        ) from error
+    except MfaConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service temporarily unavailable",
         ) from error
     set_session_cookies(response, issue, settings)
     return AuthenticatedUserResponse(
@@ -262,6 +350,7 @@ async def refresh_session(
             csrf_cookie=csrf_cookie,
             csrf_header=csrf_header or "",
             user_agent=request.headers.get("User-Agent"),
+            request_id=_request_id(request),
         )
     except (InvalidSessionError, InvalidCsrfTokenError, RefreshTokenReuseError):
         invalid = JSONResponse(
@@ -297,6 +386,7 @@ async def destroy_session(
                 raw_refresh_token=raw_refresh,
                 csrf_cookie=csrf_cookie,
                 csrf_header=csrf_header or "",
+                request_id=_request_id(request),
             )
         except InvalidCsrfTokenError as error:
             raise HTTPException(
@@ -316,6 +406,102 @@ async def current_user(user: CurrentUser) -> AuthenticatedUserResponse:
         email=user.email,
         displayName=user.display_name,
         role=user.role,
+    )
+
+
+@router.get("/mfa", response_model=OwnerMfaStatusResponse)
+async def owner_mfa_status(
+    principal: OwnerPrincipal,
+    session: DatabaseSession,
+) -> OwnerMfaStatusResponse:
+    """Return only whether the primary owner has confirmed MFA."""
+    return OwnerMfaStatusResponse(enabled=await owner_mfa_enabled(session, principal.user))
+
+
+@router.post("/mfa/totp/enroll", response_model=OwnerMfaEnrollmentResponse)
+async def enroll_owner_totp(
+    payload: OwnerMfaEnrollmentRequest,
+    request: Request,
+    _origin: TrustedOrigin,
+    _csrf: SessionCsrf,
+    principal: OwnerPrincipal,
+    session: DatabaseSession,
+    settings: RuntimeSettings,
+    limiter: Limiter,
+) -> OwnerMfaEnrollmentResponse:
+    """Issue encrypted owner TOTP enrollment material after password reauthentication."""
+    await _enforce(
+        limiter,
+        "owner-mfa-enroll",
+        _token_rules(request, str(principal.user.id), limit=10),
+    )
+    try:
+        enrollment = await start_owner_mfa_enrollment(
+            session,
+            settings,
+            principal=principal,
+            current_password=payload.current_password,
+            request_id=_request_id(request),
+        )
+    except InvalidOwnerPasswordError as error:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is invalid",
+        ) from error
+    except MfaAlreadyEnabledError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="MFA is already enabled",
+        ) from error
+    return OwnerMfaEnrollmentResponse(
+        secret=enrollment.secret,
+        provisioningUri=enrollment.provisioning_uri,
+    )
+
+
+@router.post("/mfa/totp/confirm", response_model=OwnerMfaConfirmationResponse)
+async def confirm_owner_totp(
+    payload: OwnerMfaConfirmationRequest,
+    request: Request,
+    _origin: TrustedOrigin,
+    _csrf: SessionCsrf,
+    principal: OwnerPrincipal,
+    session: DatabaseSession,
+    settings: RuntimeSettings,
+    limiter: Limiter,
+) -> OwnerMfaConfirmationResponse:
+    """Enable owner TOTP and return one-time recovery codes."""
+    await _enforce(
+        limiter,
+        "owner-mfa-confirm",
+        _token_rules(request, str(principal.user.id), limit=10),
+    )
+    try:
+        confirmation = await confirm_owner_mfa_enrollment(
+            session,
+            settings,
+            principal=principal,
+            code=payload.code,
+            request_id=_request_id(request),
+        )
+    except InvalidMfaCodeError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="MFA code is invalid or has already been used",
+        ) from error
+    except MfaEnrollmentRequiredError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Start MFA enrollment first",
+        ) from error
+    except MfaConfigurationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service temporarily unavailable",
+        ) from error
+    return OwnerMfaConfirmationResponse(
+        message="Owner MFA enabled",
+        recoveryCodes=list(confirmation.recovery_codes),
     )
 
 
@@ -362,6 +548,7 @@ async def complete_password_reset(
             settings,
             raw_token=payload.token,
             new_password=payload.new_password,
+            request_id=_request_id(request),
         )
     except InvalidOneTimeTokenError as error:
         raise HTTPException(

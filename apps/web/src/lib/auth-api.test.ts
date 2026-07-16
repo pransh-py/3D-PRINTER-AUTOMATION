@@ -6,8 +6,10 @@ import {
   fragmentlessLocation,
   getCurrentUserWithRefresh,
   logoutSession,
+  loginBuyer,
   readCsrfCookie,
   registerBuyer,
+  startOwnerMfaEnrollment,
 } from "./auth-api.ts";
 
 test("reads development and production CSRF cookie names", () => {
@@ -113,4 +115,47 @@ test("coalesces concurrent current-user refresh flows", async () => {
     "/api/v1/auth/refresh",
     "/api/v1/auth/me",
   ]);
+});
+
+test("keeps an owner MFA challenge in the explicit login result", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    Response.json(
+      { mfaRequired: true, challenge: "challenge-value-that-is-long-enough" },
+      { status: 202 },
+    );
+  try {
+    const result = await loginBuyer({
+      email: "owner@example.com",
+      password: "a secure password",
+    });
+    assert.deepEqual(result, {
+      kind: "mfa_required",
+      challenge: "challenge-value-that-is-long-enough",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("owner enrollment sends password JSON with session-bound CSRF", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedInit: RequestInit | undefined;
+  globalThis.fetch = async (_input, init) => {
+    capturedInit = init;
+    return Response.json({
+      secret: "BASE32SECRET",
+      provisioningUri: "otpauth://totp/xxx:owner",
+    });
+  };
+  try {
+    await startOwnerMfaEnrollment("current password", "xxx_csrf=signed%3Atoken");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(new Headers(capturedInit?.headers).get("x-csrf-token"), "signed:token");
+  assert.deepEqual(JSON.parse(String(capturedInit?.body)), {
+    currentPassword: "current password",
+  });
 });

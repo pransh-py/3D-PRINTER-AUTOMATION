@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     token_hash_secret: SecretStr = SecretStr(
         "development-only-token-secret-change-before-production"
     )
+    mfa_encryption_secret: SecretStr = SecretStr(
+        "development-only-mfa-encryption-secret-change-before-production"
+    )
+    mfa_issuer: str = "xxx"
+    mfa_challenge_ttl_seconds: int = Field(default=300, ge=120, le=600)
+    recent_owner_mfa_ttl_seconds: int = Field(default=600, ge=300, le=1800)
     access_token_ttl_seconds: int = Field(default=900, ge=300, le=3600)
     refresh_token_ttl_days: int = Field(default=30, ge=1, le=90)
     max_active_sessions_per_user: int = Field(default=10, ge=1, le=50)
@@ -61,6 +67,7 @@ class Settings(BaseSettings):
         if self.environment == "production":
             jwt_secret = self.jwt_signing_secret.get_secret_value()
             token_secret = self.token_hash_secret.get_secret_value()
+            mfa_secret = self.mfa_encryption_secret.get_secret_value()
             if self.debug:
                 raise ValueError("debug must be disabled in production")
             if "*" in self.allowed_origins:
@@ -73,10 +80,13 @@ class Settings(BaseSettings):
                 raise ValueError("production JWT signing secret is not configured")
             if token_secret.startswith("development-only"):
                 raise ValueError("production token hash secret is not configured")
-            if len(jwt_secret.encode("utf-8")) < 32 or len(token_secret.encode("utf-8")) < 32:
+            if mfa_secret.startswith("development-only"):
+                raise ValueError("production MFA encryption secret is not configured")
+            auth_secrets = (jwt_secret, token_secret, mfa_secret)
+            if any(len(secret.encode("utf-8")) < 32 for secret in auth_secrets):
                 raise ValueError("production authentication secrets must be at least 32 bytes")
-            if jwt_secret == token_secret:
-                raise ValueError("JWT signing and token hash secrets must be distinct")
+            if len(set(auth_secrets)) != len(auth_secrets):
+                raise ValueError("authentication secrets must be distinct")
             if self.public_web_url.scheme != "https":
                 raise ValueError("production public web URL must use HTTPS")
             if self.email_sender_address == "no-reply@example.com":
@@ -89,6 +99,8 @@ class Settings(BaseSettings):
             raise ValueError("SMTP STARTTLS and implicit TLS cannot both be enabled")
         if bool(self.smtp_username) != bool(self.smtp_password):
             raise ValueError("SMTP username and password must be configured together")
+        if not self.mfa_issuer.strip() or len(self.mfa_issuer) > 64:
+            raise ValueError("MFA issuer must contain between 1 and 64 characters")
         return self
 
 

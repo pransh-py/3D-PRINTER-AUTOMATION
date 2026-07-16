@@ -48,6 +48,26 @@ The API defaults to a local SQLite database for development. Apply reviewed migr
 
 Set `XXX_DATABASE_URL` to the deployment PostgreSQL URL before running the same command outside local development.
 
+## Owner provisioning and MFA recovery
+
+After migrations, provision the one business owner from a trusted deployment shell. The
+password is requested interactively and is never accepted as a command-line option:
+
+```sh
+.venv313/bin/xxx-api provision-owner --email owner@example.com --display-name "Business Owner"
+```
+
+If the owner loses both the authenticator and every recovery code, use the deployment-only
+recovery command. It verifies the current password, removes MFA, and revokes every owner
+session before re-enrollment:
+
+```sh
+.venv313/bin/xxx-api reset-owner-mfa --email owner@example.com
+```
+
+Production also requires a distinct random `XXX_MFA_ENCRYPTION_SECRET` of at least 32 bytes.
+It must not equal the JWT signing or token-hash secret.
+
 ## Verify
 
 ```sh

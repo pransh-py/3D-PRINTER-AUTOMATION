@@ -236,6 +236,78 @@
   font-weight: 700;
 }
 
+.secondaryButton {
+  min-height: 44px;
+  border: 1px solid var(--ink);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.secondaryButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.secondaryButton:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: 3px;
+}
+
+.securityPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 20px;
+  border: 1px solid var(--ink);
+  background: rgba(19, 18, 15, 0.035);
+}
+
+.securityPanel h2,
+.securityPanel h3,
+.securityPanel p {
+  margin: 0;
+}
+
+.securityPanel h2 {
+  font-size: 1rem;
+  text-transform: uppercase;
+}
+
+.enrollmentSecret,
+.recoveryNotice {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.enrollmentSecret > code {
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+}
+
+.recoveryCodes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 18px;
+  margin: 0;
+  padding-left: 24px;
+}
+
+.recoveryCodes code {
+  font-size: 0.82rem;
+}
+
 .accountDetails {
   display: grid;
   gap: 14px;
@@ -295,5 +367,9 @@
 @media (max-width: 720px) {
   .card {
     margin-top: 6vh;
+  }
+
+  .recoveryCodes {
+    grid-template-columns: 1fr;
   }
 }

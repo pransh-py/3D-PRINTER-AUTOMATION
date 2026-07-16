@@ -25,6 +25,9 @@ Exit gate: no unresolved decision blocks auth/uploads; named owners and deadline
 
 Exit gate: identity integration tests and cross-role negative tests pass; no owner public signup exists.
 
+Current status: the repository implementation and automated identity gate are complete. Live
+production SMTP/Redis smoke testing and deployment owner enrollment remain release operations.
+
 ## Day 2: uploads and analysis
 
 - Implement quote-request creation and signed private uploads.

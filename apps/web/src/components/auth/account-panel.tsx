@@ -11,6 +11,7 @@ import {
 } from "@/lib/auth-api";
 
 import styles from "./auth-form.module.css";
+import { OwnerMfaPanel } from "./owner-mfa-panel";
 
 export function AccountPanel() {
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
@@ -96,6 +97,7 @@ export function AccountPanel() {
       <p className={styles.help}>
         Model uploads, quotes, and order tracking will appear here in the next product phase.
       </p>
+      {user.role === "owner" && <OwnerMfaPanel />}
       {error && (
         <p className={styles.error} role="alert">
           {error}

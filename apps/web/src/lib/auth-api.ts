@@ -9,6 +9,20 @@ export type AuthenticatedUser = Readonly<{
 
 type MessageResponse = Readonly<{ message: string }>;
 
+export type LoginResult =
+  | Readonly<{ kind: "authenticated"; user: AuthenticatedUser }>
+  | Readonly<{ kind: "mfa_required"; challenge: string }>;
+
+export type OwnerMfaEnrollment = Readonly<{
+  secret: string;
+  provisioningUri: string;
+}>;
+
+export type OwnerMfaConfirmation = Readonly<{
+  message: string;
+  recoveryCodes: readonly string[];
+}>;
+
 let currentUserRequest: Promise<AuthenticatedUser> | null = null;
 
 export class AuthApiError extends Error {
@@ -53,6 +67,14 @@ function authenticatedUser(payload: unknown): AuthenticatedUser {
     displayName: payload.displayName,
     role: payload.role,
   };
+}
+
+function csrfToken(cookieString: string): string {
+  const token = readCsrfCookie(cookieString);
+  if (token === null) {
+    throw new AuthApiError("Your session has expired. Please sign in again.", 401);
+  }
+  return token;
 }
 
 async function readPayload(response: Response): Promise<unknown> {
@@ -167,8 +189,26 @@ export async function registerBuyer(input: {
 export async function loginBuyer(input: {
   email: string;
   password: string;
-}): Promise<AuthenticatedUser> {
-  return authenticatedUser(await request<unknown>("/login", { method: "POST", body: input }));
+}): Promise<LoginResult> {
+  const payload = await request<unknown>("/login", { method: "POST", body: input });
+  if (
+    isRecord(payload) &&
+    payload.mfaRequired === true &&
+    typeof payload.challenge === "string" &&
+    payload.challenge.length > 0
+  ) {
+    return { kind: "mfa_required", challenge: payload.challenge };
+  }
+  return { kind: "authenticated", user: authenticatedUser(payload) };
+}
+
+export async function completeMfaLogin(challenge: string, code: string): Promise<AuthenticatedUser> {
+  return authenticatedUser(
+    await request<unknown>("/login/mfa", {
+      method: "POST",
+      body: { challenge, code },
+    }),
+  );
 }
 
 export async function requestPasswordReset(email: string): Promise<MessageResponse> {
@@ -204,11 +244,7 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
 }
 
 export async function refreshSession(cookieString: string): Promise<void> {
-  const csrfToken = readCsrfCookie(cookieString);
-  if (csrfToken === null) {
-    throw new AuthApiError("Your session has expired. Please sign in again.", 401);
-  }
-  await request<void>("/refresh", { method: "POST", csrfToken });
+  await request<void>("/refresh", { method: "POST", csrfToken: csrfToken(cookieString) });
 }
 
 async function loadCurrentUserWithRefresh(cookieString: string): Promise<AuthenticatedUser> {
@@ -239,9 +275,52 @@ export function getCurrentUserWithRefresh(cookieString: string): Promise<Authent
 }
 
 export async function logoutSession(cookieString: string): Promise<void> {
-  const csrfToken = readCsrfCookie(cookieString);
-  if (csrfToken === null) {
-    throw new AuthApiError("Your session has expired. Please sign in again.", 401);
+  await request<void>("/logout", { method: "POST", csrfToken: csrfToken(cookieString) });
+}
+
+export async function getOwnerMfaStatus(): Promise<boolean> {
+  const payload = await request<unknown>("/mfa");
+  if (!isRecord(payload) || typeof payload.enabled !== "boolean") {
+    throw new AuthApiError("The account service returned an invalid response.", 502);
   }
-  await request<void>("/logout", { method: "POST", csrfToken });
+  return payload.enabled;
+}
+
+export async function startOwnerMfaEnrollment(
+  currentPassword: string,
+  cookieString: string,
+): Promise<OwnerMfaEnrollment> {
+  const payload = await request<unknown>("/mfa/totp/enroll", {
+    method: "POST",
+    csrfToken: csrfToken(cookieString),
+    body: { currentPassword },
+  });
+  if (
+    !isRecord(payload) ||
+    typeof payload.secret !== "string" ||
+    typeof payload.provisioningUri !== "string"
+  ) {
+    throw new AuthApiError("The account service returned an invalid response.", 502);
+  }
+  return { secret: payload.secret, provisioningUri: payload.provisioningUri };
+}
+
+export async function confirmOwnerMfaEnrollment(
+  code: string,
+  cookieString: string,
+): Promise<OwnerMfaConfirmation> {
+  const payload = await request<unknown>("/mfa/totp/confirm", {
+    method: "POST",
+    csrfToken: csrfToken(cookieString),
+    body: { code },
+  });
+  if (
+    !isRecord(payload) ||
+    typeof payload.message !== "string" ||
+    !Array.isArray(payload.recoveryCodes) ||
+    !payload.recoveryCodes.every((item) => typeof item === "string")
+  ) {
+    throw new AuthApiError("The account service returned an invalid response.", 502);
+  }
+  return { message: payload.message, recoveryCodes: payload.recoveryCodes };
 }

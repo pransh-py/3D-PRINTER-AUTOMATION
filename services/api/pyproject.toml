@@ -11,11 +11,13 @@ dependencies = [
   "aiosqlite>=0.21,<1",
   "alembic>=1.18,<2",
   "email-validator>=2.2,<3",
+  "cryptography>=44,<50",
   "fastapi>=0.115,<1",
   "psycopg[binary,pool]>=3.2,<4",
   "pwdlib[argon2]>=0.3,<1",
   "pyjwt[crypto]>=2.10,<3",
   "pydantic-settings>=2.7,<3",
+  "pyotp>=2.9,<3",
   "redis>=8,<9",
   "sqlalchemy[asyncio]>=2.0.51,<2.1",
   "uvicorn[standard]>=0.34,<1",
@@ -28,6 +30,9 @@ dev = [
   "pytest>=8.3,<9",
   "ruff>=0.9,<1",
 ]
+
+[project.scripts]
+xxx-api = "xxx_api.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/xxx_api"]

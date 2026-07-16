@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from xxx_api.config import Settings
-from xxx_api.domain.auth import OneTimeTokenPurpose, UserStatus
+from xxx_api.domain.auth import AuditEventType, OneTimeTokenPurpose, UserStatus
 from xxx_api.domain.roles import Role
-from xxx_api.models.identity import OneTimeToken, RefreshSession, User
+from xxx_api.models.identity import MfaMethod, OneTimeToken, RefreshSession, User
 from xxx_api.security.email import normalize_email
 from xxx_api.security.passwords import MAX_PASSWORD_BYTES, hash_password, verify_password
 from xxx_api.security.tokens import (
@@ -31,6 +31,7 @@ from xxx_api.security.tokens import (
     issue_opaque_token,
     verify_csrf_token,
 )
+from xxx_api.services.audit import append_audit_event
 
 DUMMY_PASSWORD_HASH = (
     "$argon2id$v=19$m=65536,t=3,p=4$mkM1dnEgmRyOd7Ln+ojEqg$"
@@ -99,6 +100,22 @@ class SessionIssue:
     refresh_expires_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class MfaChallengeIssue:
+    """Short-lived owner login challenge that cannot create a session alone."""
+
+    challenge: str
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class AuthenticatedPrincipal:
+    """Server-validated user and the exact session behind the access token."""
+
+    user: User
+    refresh_session: RefreshSession
+
+
 def _utc_now(now: datetime | None) -> datetime:
     value = now or datetime.now(UTC)
     if value.tzinfo is None:
@@ -140,6 +157,7 @@ async def register_buyer(
     display_name: str,
     password: str,
     now: datetime | None = None,
+    request_id: str | None = None,
 ) -> RegistrationIssue | None:
     """Create one pending buyer; return none for an existing normalized email."""
     normalized_email = normalize_email(email)
@@ -172,6 +190,15 @@ async def register_buyer(
                 token_digest=opaque_token.digest,
                 expires_at=expires_at,
             )
+        )
+        append_audit_event(
+            session,
+            AuditEventType.BUYER_REGISTERED,
+            occurred_at=issued_at,
+            actor_user_id=user.id,
+            target_user_id=user.id,
+            request_id=request_id,
+            details={"role": Role.BUYER.value},
         )
         await session.commit()
     except IntegrityError:
@@ -235,6 +262,7 @@ async def verify_email(
     *,
     raw_token: str,
     now: datetime | None = None,
+    request_id: str | None = None,
 ) -> UUID:
     """Consume one verification token and activate its buyer identity."""
     verified_at = _utc_now(now)
@@ -267,6 +295,14 @@ async def verify_email(
             OneTimeToken.consumed_at.is_(None),
         )
         .values(consumed_at=verified_at)
+    )
+    append_audit_event(
+        session,
+        AuditEventType.EMAIL_VERIFIED,
+        occurred_at=verified_at,
+        actor_user_id=token_record.user_id,
+        target_user_id=token_record.user_id,
+        request_id=request_id,
     )
     await session.commit()
     return token_record.user_id
@@ -301,6 +337,67 @@ def _build_session_issue(
     )
 
 
+async def issue_session_for_user(
+    session: AsyncSession,
+    settings: Settings,
+    *,
+    user: User,
+    authenticated_at: datetime,
+    mfa_authenticated_at: datetime | None,
+    user_agent: str | None = None,
+    request_id: str | None = None,
+) -> SessionIssue:
+    """Create one bounded server-side session for an already authenticated user."""
+    active_family_ids = (
+        await session.scalars(
+            select(RefreshSession.family_id)
+            .where(
+                RefreshSession.user_id == user.id,
+                RefreshSession.rotated_at.is_(None),
+                RefreshSession.revoked_at.is_(None),
+                RefreshSession.expires_at > authenticated_at,
+            )
+            .order_by(RefreshSession.created_at)
+        )
+    ).all()
+    families_to_revoke = 1 + len(active_family_ids) - settings.max_active_sessions_per_user
+    for family_id in active_family_ids[: max(0, families_to_revoke)]:
+        await _revoke_family(session, family_id, authenticated_at)
+
+    opaque_token = issue_opaque_token(settings)
+    refresh_expires_at = authenticated_at + timedelta(days=settings.refresh_token_ttl_days)
+    refresh_session = RefreshSession(
+        user_id=user.id,
+        token_digest=opaque_token.digest,
+        expires_at=refresh_expires_at,
+        created_at=authenticated_at,
+        authenticated_at=authenticated_at,
+        mfa_authenticated_at=mfa_authenticated_at,
+        user_agent_digest=_user_agent_digest(user_agent),
+    )
+    session.add(refresh_session)
+    await session.flush()
+    append_audit_event(
+        session,
+        AuditEventType.SESSION_CREATED,
+        occurred_at=authenticated_at,
+        actor_user_id=user.id,
+        target_user_id=user.id,
+        session_id=refresh_session.id,
+        request_id=request_id,
+        details={"mfa": mfa_authenticated_at is not None, "role": user.role.value},
+    )
+    await session.commit()
+    return _build_session_issue(
+        user=user,
+        session_id=refresh_session.id,
+        refresh_token=opaque_token.raw,
+        refresh_expires_at=refresh_expires_at,
+        issued_at=authenticated_at,
+        settings=settings,
+    )
+
+
 async def login(
     session: AsyncSession,
     settings: Settings,
@@ -309,7 +406,8 @@ async def login(
     password: str,
     user_agent: str | None = None,
     now: datetime | None = None,
-) -> SessionIssue:
+    request_id: str | None = None,
+) -> SessionIssue | MfaChallengeIssue:
     """Authenticate an active verified buyer or provisioned owner."""
     normalized_email = normalize_email(email)
     user = await session.scalar(
@@ -326,41 +424,56 @@ async def login(
         await session.rollback()
         raise VerificationRequiredError
 
-    issued_at = _utc_now(now)
-    active_family_ids = (
-        await session.scalars(
-            select(RefreshSession.family_id)
-            .where(
-                RefreshSession.user_id == user.id,
-                RefreshSession.rotated_at.is_(None),
-                RefreshSession.revoked_at.is_(None),
-                RefreshSession.expires_at > issued_at,
+    authenticated_at = _utc_now(now)
+    if user.role is Role.OWNER:
+        enabled_mfa = await session.scalar(
+            select(MfaMethod).where(
+                MfaMethod.user_id == user.id,
+                MfaMethod.enabled_at.is_not(None),
             )
-            .order_by(RefreshSession.created_at)
         )
-    ).all()
-    families_to_revoke = 1 + len(active_family_ids) - settings.max_active_sessions_per_user
-    for family_id in active_family_ids[: max(0, families_to_revoke)]:
-        await _revoke_family(session, family_id, issued_at)
+        if enabled_mfa is not None:
+            challenge = issue_opaque_token(settings)
+            expires_at = authenticated_at + timedelta(
+                seconds=settings.mfa_challenge_ttl_seconds
+            )
+            await session.execute(
+                update(OneTimeToken)
+                .where(
+                    OneTimeToken.user_id == user.id,
+                    OneTimeToken.purpose == OneTimeTokenPurpose.MFA_LOGIN,
+                    OneTimeToken.consumed_at.is_(None),
+                )
+                .values(consumed_at=authenticated_at)
+            )
+            session.add(
+                OneTimeToken(
+                    user_id=user.id,
+                    purpose=OneTimeTokenPurpose.MFA_LOGIN,
+                    token_digest=challenge.digest,
+                    expires_at=expires_at,
+                    created_at=authenticated_at,
+                )
+            )
+            append_audit_event(
+                session,
+                AuditEventType.OWNER_MFA_CHALLENGE_ISSUED,
+                occurred_at=authenticated_at,
+                actor_user_id=user.id,
+                target_user_id=user.id,
+                request_id=request_id,
+            )
+            await session.commit()
+            return MfaChallengeIssue(challenge=challenge.raw, expires_at=expires_at)
 
-    opaque_token = issue_opaque_token(settings)
-    refresh_expires_at = issued_at + timedelta(days=settings.refresh_token_ttl_days)
-    refresh_session = RefreshSession(
-        user_id=user.id,
-        token_digest=opaque_token.digest,
-        expires_at=refresh_expires_at,
-        created_at=issued_at,
-        user_agent_digest=_user_agent_digest(user_agent),
-    )
-    session.add(refresh_session)
-    await session.commit()
-    return _build_session_issue(
+    return await issue_session_for_user(
+        session,
+        settings,
         user=user,
-        session_id=refresh_session.id,
-        refresh_token=opaque_token.raw,
-        refresh_expires_at=refresh_expires_at,
-        issued_at=issued_at,
-        settings=settings,
+        authenticated_at=authenticated_at,
+        mfa_authenticated_at=None,
+        user_agent=user_agent,
+        request_id=request_id,
     )
 
 
@@ -388,6 +501,7 @@ async def rotate_refresh_token(
     csrf_header: str,
     user_agent: str | None = None,
     now: datetime | None = None,
+    request_id: str | None = None,
 ) -> SessionIssue:
     """Rotate one refresh token and revoke its family when replay is detected."""
     rotated_at = _utc_now(now)
@@ -411,6 +525,15 @@ async def rotate_refresh_token(
         raise InvalidCsrfTokenError
     if current.rotated_at is not None:
         await _revoke_family(session, current.family_id, rotated_at)
+        append_audit_event(
+            session,
+            AuditEventType.REFRESH_REUSE_DETECTED,
+            occurred_at=rotated_at,
+            actor_user_id=current.user_id,
+            target_user_id=current.user_id,
+            session_id=current.id,
+            request_id=request_id,
+        )
         await session.commit()
         raise RefreshTokenReuseError
     if current.revoked_at is not None or _stored_utc(current.expires_at) <= rotated_at:
@@ -433,6 +556,8 @@ async def rotate_refresh_token(
         token_digest=opaque_token.digest,
         expires_at=refresh_expires_at,
         created_at=rotated_at,
+        authenticated_at=current.authenticated_at,
+        mfa_authenticated_at=current.mfa_authenticated_at,
         user_agent_digest=_user_agent_digest(user_agent),
     )
     session.add(replacement)
@@ -458,6 +583,7 @@ async def logout(
     csrf_cookie: str,
     csrf_header: str,
     now: datetime | None = None,
+    request_id: str | None = None,
 ) -> None:
     """Idempotently revoke the complete family for the supplied refresh token."""
     revoked_at = _utc_now(now)
@@ -475,19 +601,29 @@ async def logout(
             await session.rollback()
             raise InvalidCsrfTokenError
         await _revoke_family(session, current.family_id, revoked_at)
+        append_audit_event(
+            session,
+            AuditEventType.SESSION_REVOKED,
+            occurred_at=revoked_at,
+            actor_user_id=current.user_id,
+            target_user_id=current.user_id,
+            session_id=current.id,
+            request_id=request_id,
+            details={"reason": "logout"},
+        )
         await session.commit()
     else:
         await session.rollback()
 
 
-async def authenticate_access_token(
+async def authenticate_access_principal(
     session: AsyncSession,
     settings: Settings,
     *,
     raw_token: str,
     now: datetime | None = None,
-) -> User:
-    """Validate JWT claims against current user and server-side session state."""
+) -> AuthenticatedPrincipal:
+    """Validate JWT claims and return the exact persisted user/session principal."""
     try:
         claims: AccessTokenClaims = decode_access_token(raw_token, settings)
     except ValueError as error:
@@ -513,7 +649,24 @@ async def authenticate_access_token(
         or int(claims.issued_at.timestamp()) < int(password_changed_at.timestamp())
     ):
         raise InvalidSessionError
-    return user
+    return AuthenticatedPrincipal(user=user, refresh_session=current)
+
+
+async def authenticate_access_token(
+    session: AsyncSession,
+    settings: Settings,
+    *,
+    raw_token: str,
+    now: datetime | None = None,
+) -> User:
+    """Compatibility wrapper returning the validated principal's user."""
+    principal = await authenticate_access_principal(
+        session,
+        settings,
+        raw_token=raw_token,
+        now=now,
+    )
+    return principal.user
 
 
 async def request_password_reset(
@@ -571,6 +724,7 @@ async def reset_password(
     raw_token: str,
     new_password: str,
     now: datetime | None = None,
+    request_id: str | None = None,
 ) -> UUID:
     """Consume a reset token, replace the password, and revoke every session."""
     password_hash = await to_thread.run_sync(hash_password, new_password)
@@ -612,6 +766,14 @@ async def reset_password(
             RefreshSession.revoked_at.is_(None),
         )
         .values(revoked_at=changed_at)
+    )
+    append_audit_event(
+        session,
+        AuditEventType.PASSWORD_RESET,
+        occurred_at=changed_at,
+        actor_user_id=token_record.user_id,
+        target_user_id=token_record.user_id,
+        request_id=request_id,
     )
     await session.commit()
     return token_record.user_id
