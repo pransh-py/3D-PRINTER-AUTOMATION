@@ -151,6 +151,8 @@ def test_refresh_rotation_replay_revokes_the_complete_family() -> None:
                 session,
                 settings,
                 raw_token=original.refresh_token,
+                csrf_cookie=original.csrf_token,
+                csrf_header=original.csrf_token,
                 user_agent="test-browser/1",
                 now=now + timedelta(seconds=4),
             )
@@ -177,6 +179,8 @@ def test_refresh_rotation_replay_revokes_the_complete_family() -> None:
                     session,
                     settings,
                     raw_token=original.refresh_token,
+                    csrf_cookie=original.csrf_token,
+                    csrf_header=original.csrf_token,
                     now=now + timedelta(seconds=6),
                 )
         async with sessions() as session:
@@ -333,6 +337,8 @@ def test_password_reset_revokes_sessions_and_replaces_credentials() -> None:
                 session,
                 settings,
                 raw_refresh_token=replacement.refresh_token,
+                csrf_cookie=replacement.csrf_token,
+                csrf_header=replacement.csrf_token,
                 now=now + timedelta(seconds=8),
             )
         async with sessions() as session:

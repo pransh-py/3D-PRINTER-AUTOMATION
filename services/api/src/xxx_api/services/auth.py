@@ -29,6 +29,7 @@ from xxx_api.security.tokens import (
     issue_access_token,
     issue_csrf_token,
     issue_opaque_token,
+    verify_csrf_token,
 )
 
 DUMMY_PASSWORD_HASH = (
@@ -61,6 +62,10 @@ class RefreshTokenReuseError(InvalidSessionError):
     """A rotated refresh token was replayed and its family was revoked."""
 
 
+class InvalidCsrfTokenError(AuthenticationError):
+    """Cookie-authenticated state change lacked its session-bound CSRF proof."""
+
+
 @dataclass(frozen=True, slots=True)
 class RegistrationIssue:
     """New buyer identity plus the verification token for the email adapter."""
@@ -84,6 +89,8 @@ class SessionIssue:
     """Bearer values returned once to the HTTP cookie adapter."""
 
     user_id: UUID
+    email: str
+    display_name: str
     role: Role
     access_token: str
     refresh_token: str
@@ -276,6 +283,8 @@ def _build_session_issue(
 ) -> SessionIssue:
     return SessionIssue(
         user_id=user.id,
+        email=user.email,
+        display_name=user.display_name,
         role=user.role,
         access_token=issue_access_token(
             user_id=user.id,
@@ -375,6 +384,8 @@ async def rotate_refresh_token(
     settings: Settings,
     *,
     raw_token: str,
+    csrf_cookie: str,
+    csrf_header: str,
     user_agent: str | None = None,
     now: datetime | None = None,
 ) -> SessionIssue:
@@ -390,6 +401,14 @@ async def rotate_refresh_token(
     if current is None:
         await session.rollback()
         raise InvalidSessionError
+    if not verify_csrf_token(
+        csrf_cookie,
+        csrf_header,
+        current.id,
+        settings,
+    ):
+        await session.rollback()
+        raise InvalidCsrfTokenError
     if current.rotated_at is not None:
         await _revoke_family(session, current.family_id, rotated_at)
         await session.commit()
@@ -436,6 +455,8 @@ async def logout(
     settings: Settings,
     *,
     raw_refresh_token: str,
+    csrf_cookie: str,
+    csrf_header: str,
     now: datetime | None = None,
 ) -> None:
     """Idempotently revoke the complete family for the supplied refresh token."""
@@ -445,6 +466,14 @@ async def logout(
         select(RefreshSession).where(RefreshSession.token_digest == token_digest)
     )
     if current is not None:
+        if not verify_csrf_token(
+            csrf_cookie,
+            csrf_header,
+            current.id,
+            settings,
+        ):
+            await session.rollback()
+            raise InvalidCsrfTokenError
         await _revoke_family(session, current.family_id, revoked_at)
         await session.commit()
     else:

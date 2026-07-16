@@ -28,6 +28,11 @@ def test_production_accepts_https_origin() -> None:
         secure_cookies=True,
         jwt_signing_secret="production-jwt-signing-secret-1234567890",
         token_hash_secret="production-token-hash-secret-0987654321",
+        public_web_url="https://example.com",
+        email_sender_address="no-reply@example.org",
+        smtp_host="smtp.example.org",
+        smtp_port=587,
+        smtp_starttls=True,
     )
 
     assert settings.debug is False
@@ -52,4 +57,27 @@ def test_production_rejects_shared_authentication_secret() -> None:
             secure_cookies=True,
             jwt_signing_secret=shared_secret,
             token_hash_secret=shared_secret,
+            public_web_url="https://example.com",
+            email_sender_address="no-reply@example.org",
+            smtp_host="smtp.example.org",
+            smtp_port=587,
+            smtp_starttls=True,
         )
+
+
+def test_production_rejects_local_email_transport() -> None:
+    with pytest.raises(ValidationError, match="SMTP provider"):
+        Settings(
+            environment="production",
+            allowed_origins=["https://example.com"],
+            secure_cookies=True,
+            jwt_signing_secret="production-jwt-signing-secret-1234567890",
+            token_hash_secret="production-token-hash-secret-0987654321",
+            public_web_url="https://example.com",
+            email_sender_address="no-reply@example.org",
+        )
+
+
+def test_smtp_tls_modes_are_mutually_exclusive() -> None:
+    with pytest.raises(ValidationError, match="cannot both be enabled"):
+        Settings(smtp_starttls=True, smtp_use_tls=True)

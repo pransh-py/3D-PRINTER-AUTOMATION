@@ -52,3 +52,17 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         return bool(value) and len(value) <= 64 and all(
             character.isalnum() or character in "-_" for character in value
         )
+
+
+class AuthResponseSecurityMiddleware(BaseHTTPMiddleware):
+    """Prevent storage of authentication responses and reduce browser ambiguity."""
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await call_next(request)
+        api_prefix = request.app.state.settings.api_prefix
+        if request.url.path.startswith(f"{api_prefix}/auth"):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+        return response

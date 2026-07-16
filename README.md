@@ -58,10 +58,12 @@ npm --prefix apps/web run build
 
 ## Development services
 
-After Docker is installed:
+Authentication requires Redis for distributed rate limits and Mailpit for local verification/reset email. After Docker is installed:
 
 ```sh
 docker compose -f infra/compose.yaml up -d
 ```
 
 The compose file is for local development only. Its credentials must never be reused in production.
+
+Mailpit's local inbox is available at `http://localhost:8025`. Production requires a real HTTPS web URL, sender address, and SMTP provider configuration; the API rejects the development defaults in production mode.

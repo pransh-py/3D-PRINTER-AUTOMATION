@@ -1,9 +1,20 @@
 """API foundation integration tests."""
 
 from fastapi.testclient import TestClient
+from redis.exceptions import RedisError
 
 from xxx_api.config import Settings
 from xxx_api.main import create_app
+
+
+class HealthyRedis:
+    async def ping(self) -> bool:
+        return True
+
+
+class UnhealthyRedis:
+    async def ping(self) -> bool:
+        raise RedisError
 
 
 def test_liveness_has_stable_contract_and_request_id() -> None:
@@ -16,14 +27,40 @@ def test_liveness_has_stable_contract_and_request_id() -> None:
     assert response.headers["X-Request-ID"] == "test-request-1"
 
 
+def test_readiness_fails_when_redis_is_unavailable() -> None:
+    app = create_app(
+        Settings(environment="test", database_url="sqlite+aiosqlite:///:memory:")
+    )
+    app.state.redis = UnhealthyRedis()
+    client = TestClient(app)
+
+    response = client.get("/health/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Service not ready"}
+
+
 def test_unsafe_request_id_is_replaced() -> None:
     client = TestClient(create_app(Settings(environment="test")))
 
-    response = client.get("/health/ready", headers={"X-Request-ID": "unsafe request id"})
+    response = client.get("/health/live", headers={"X-Request-ID": "unsafe request id"})
 
     assert response.status_code == 200
     assert response.headers["X-Request-ID"] != "unsafe request id"
     assert len(response.headers["X-Request-ID"]) == 32
+
+
+def test_readiness_checks_configured_dependencies() -> None:
+    app = create_app(
+        Settings(environment="test", database_url="sqlite+aiosqlite:///:memory:")
+    )
+    app.state.redis = HealthyRedis()
+    client = TestClient(app)
+
+    response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
 
 
 def test_production_disables_interactive_docs() -> None:
@@ -35,6 +72,11 @@ def test_production_disables_interactive_docs() -> None:
                 secure_cookies=True,
                 jwt_signing_secret="production-jwt-signing-secret-1234567890",
                 token_hash_secret="production-token-hash-secret-0987654321",
+                public_web_url="https://example.com",
+                email_sender_address="no-reply@example.org",
+                smtp_host="smtp.example.org",
+                smtp_port=587,
+                smtp_starttls=True,
             )
         )
     )
