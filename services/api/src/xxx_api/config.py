@@ -1,6 +1,7 @@
 """Validated application configuration."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, cast
 
 from pydantic import AnyHttpUrl, EmailStr, Field, SecretStr, model_validator
@@ -8,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["development", "test", "staging", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+AnalysisSandboxMode = Literal["process", "bubblewrap"]
 
 
 class Settings(BaseSettings):
@@ -47,6 +49,20 @@ class Settings(BaseSettings):
     max_active_sessions_per_user: int = Field(default=10, ge=1, le=50)
     redis_url: str = "redis://127.0.0.1:6379/0"
     redis_socket_timeout_seconds: float = Field(default=1.0, gt=0, le=5)
+    analysis_stream_name: str = Field(
+        default="xxx:analysis",
+        pattern=r"^[a-z0-9:_-]{3,64}$",
+    )
+    analysis_consumer_group: str = Field(
+        default="xxx-analysis-workers",
+        pattern=r"^[a-z0-9:_-]{3,64}$",
+    )
+    analysis_lease_seconds: int = Field(default=600, ge=120, le=3600)
+    analysis_max_attempts: int = Field(default=3, ge=1, le=10)
+    analysis_validator_command: str = "xxx-analyzer"
+    analysis_validator_timeout_seconds: int = Field(default=60, ge=5, le=300)
+    analysis_sandbox_mode: AnalysisSandboxMode = "process"
+    analysis_bubblewrap_command: str = "bwrap"
     storage_endpoint_url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:9000")
     storage_region: str = Field(default="us-east-1", min_length=1, max_length=64)
     storage_bucket: str = Field(
@@ -108,6 +124,12 @@ class Settings(BaseSettings):
                 "development-"
             ):
                 raise ValueError("production object-storage credentials are not configured")
+            if not Path(self.analysis_validator_command).is_absolute():
+                raise ValueError("production analysis validator command must be an absolute path")
+            if self.analysis_sandbox_mode != "bubblewrap":
+                raise ValueError("production analysis sandbox must use bubblewrap isolation")
+            if not Path(self.analysis_bubblewrap_command).is_absolute():
+                raise ValueError("production bubblewrap command must be an absolute path")
             if self.email_sender_address == "no-reply@example.com":
                 raise ValueError("production email sender address is not configured")
             if self.smtp_host in {"127.0.0.1", "localhost"} and self.smtp_port == 1025:

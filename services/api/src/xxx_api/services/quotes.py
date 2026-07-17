@@ -13,14 +13,22 @@ from sqlalchemy.orm import selectinload
 
 from xxx_api.config import Settings
 from xxx_api.domain.auth import AuditEventType
-from xxx_api.domain.quotes import ModelAssetStatus, ModelFormat, QuoteRequestStatus
+from xxx_api.domain.quotes import (
+    AnalysisRunStatus,
+    ModelAssetStatus,
+    ModelFormat,
+    QuoteRequestStatus,
+)
 from xxx_api.domain.roles import Role
+from xxx_api.models.analysis import AnalysisRun, OutboxEvent
 from xxx_api.models.identity import User
 from xxx_api.models.quotes import ModelAsset, QuoteRequest
 from xxx_api.services.audit import append_audit_event
 from xxx_api.storage import ObjectNotFoundError, ObjectStorage, PresignedPost
 
 UPLOAD_CONTENT_TYPE = "application/octet-stream"
+VALIDATOR_VERSION = "xxx-model-validator/1"
+ANALYSIS_TOPIC = "analysis.requested"
 FORMAT_BY_EXTENSION = {
     ".stl": ModelFormat.STL,
     ".3mf": ModelFormat.THREE_MF,
@@ -94,7 +102,10 @@ async def _visible_request(
     statement = (
         select(QuoteRequest)
         .where(QuoteRequest.id == request_id)
-        .options(selectinload(QuoteRequest.assets))
+        .options(
+            selectinload(QuoteRequest.assets),
+            selectinload(QuoteRequest.analysis_runs).selectinload(AnalysisRun.asset_results),
+        )
     )
     if lock:
         statement = statement.with_for_update()
@@ -122,7 +133,10 @@ async def create_quote_request(
             QuoteRequest.buyer_id == buyer.id,
             QuoteRequest.client_token == client_token,
         )
-        .options(selectinload(QuoteRequest.assets))
+        .options(
+            selectinload(QuoteRequest.assets),
+            selectinload(QuoteRequest.analysis_runs).selectinload(AnalysisRun.asset_results),
+        )
     )
     if existing is not None:
         return existing
@@ -136,6 +150,7 @@ async def create_quote_request(
         created_at=created_at,
         updated_at=created_at,
         assets=[],
+        analysis_runs=[],
     )
     session.add(request)
     try:
@@ -158,7 +173,12 @@ async def create_quote_request(
                 QuoteRequest.buyer_id == buyer.id,
                 QuoteRequest.client_token == client_token,
             )
-            .options(selectinload(QuoteRequest.assets))
+            .options(
+                selectinload(QuoteRequest.assets),
+                selectinload(QuoteRequest.analysis_runs).selectinload(
+                    AnalysisRun.asset_results
+                ),
+            )
         )
         if repeated is None:
             raise
@@ -180,7 +200,12 @@ async def list_quote_requests(
         await session.scalars(
             select(QuoteRequest)
             .where(*filters)
-            .options(selectinload(QuoteRequest.assets))
+            .options(
+                selectinload(QuoteRequest.assets),
+                selectinload(QuoteRequest.analysis_runs).selectinload(
+                    AnalysisRun.asset_results
+                ),
+            )
             .order_by(QuoteRequest.created_at.desc(), QuoteRequest.id)
             .limit(limit)
             .offset(offset)
@@ -429,6 +454,37 @@ async def submit_quote_request(
     request.status = QuoteRequestStatus.ANALYZING
     request.submitted_at = submitted_at
     request.version += 1
+    analysis_run = AnalysisRun(
+        id=uuid4(),
+        quote_request_id=request.id,
+        request_version=request.version,
+        status=AnalysisRunStatus.QUEUED,
+        attempt_count=0,
+        validator_version=VALIDATOR_VERSION,
+        queued_at=submitted_at,
+        created_at=submitted_at,
+        updated_at=submitted_at,
+        asset_results=[],
+    )
+    request.analysis_runs.append(analysis_run)
+    session.add(
+        OutboxEvent(
+            id=uuid4(),
+            topic=ANALYSIS_TOPIC,
+            aggregate_type="analysis_run",
+            aggregate_id=analysis_run.id,
+            idempotency_key=f"analysis:{analysis_run.id}",
+            payload={
+                "analysis_run_id": str(analysis_run.id),
+                "quote_request_id": str(request.id),
+                "request_version": request.version,
+            },
+            available_at=submitted_at,
+            attempt_count=0,
+            created_at=submitted_at,
+            updated_at=submitted_at,
+        )
+    )
     append_audit_event(
         session,
         AuditEventType.QUOTE_REQUEST_SUBMITTED,
@@ -437,6 +493,19 @@ async def submit_quote_request(
         target_user_id=buyer.id,
         request_id=audit_request_id,
         details={"quote_request_id": str(request.id), "model_count": len(active)},
+    )
+    append_audit_event(
+        session,
+        AuditEventType.ANALYSIS_RUN_QUEUED,
+        occurred_at=submitted_at,
+        actor_user_id=buyer.id,
+        target_user_id=buyer.id,
+        request_id=audit_request_id,
+        details={
+            "quote_request_id": str(request.id),
+            "analysis_run_id": str(analysis_run.id),
+            "request_version": request.version,
+        },
     )
     await session.commit()
     await session.refresh(request, attribute_names=["updated_at"])

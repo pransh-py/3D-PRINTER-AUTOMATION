@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import partial
+from pathlib import Path
 from typing import Protocol, cast
 
 import boto3
@@ -55,6 +56,14 @@ class ObjectStorage(Protocol):
     async def head(self, key: str) -> ObjectMetadata: ...
 
     async def delete(self, key: str) -> None: ...
+
+    async def download_to_path(
+        self,
+        key: str,
+        destination: Path,
+        *,
+        max_bytes: int,
+    ) -> int: ...
 
     async def check_ready(self) -> None: ...
 
@@ -139,6 +148,57 @@ class S3ObjectStorage:
             )
         except (BotoCoreError, ClientError) as error:
             raise ObjectStorageError("could not delete private object") from error
+
+    def _download_to_path(self, key: str, destination: Path, max_bytes: int) -> int:
+        body = None
+        completed = False
+        created_destination = False
+        try:
+            result = self._client.get_object(Bucket=self._bucket, Key=key)
+            expected = cast(int, result["ContentLength"])
+            body = result["Body"]
+            if expected < 1 or expected > max_bytes:
+                raise ObjectStorageError("private object size is outside the allowed range")
+            observed = 0
+            with destination.open("xb") as target:
+                created_destination = True
+                while chunk := body.read(1024 * 1024):
+                    observed += len(chunk)
+                    if observed > max_bytes:
+                        raise ObjectStorageError(
+                            "private object size is outside the allowed range"
+                        )
+                    target.write(chunk)
+            if observed != expected:
+                raise ObjectStorageError("private object length changed during download")
+            completed = True
+            return observed
+        except ClientError as error:
+            code = str(error.response.get("Error", {}).get("Code", ""))
+            if code in {"404", "NoSuchKey", "NotFound"}:
+                raise ObjectNotFoundError("private object not found") from error
+            raise ObjectStorageError("could not download private object") from error
+        except BotoCoreError as error:
+            raise ObjectStorageError("could not download private object") from error
+        except OSError as error:
+            raise ObjectStorageError("could not write private object scratch file") from error
+        finally:
+            if body is not None:
+                body.close()
+            if not completed and created_destination:
+                destination.unlink(missing_ok=True)
+
+    async def download_to_path(
+        self,
+        key: str,
+        destination: Path,
+        *,
+        max_bytes: int,
+    ) -> int:
+        """Stream one private object into an exclusive bounded scratch file."""
+        return await to_thread.run_sync(
+            partial(self._download_to_path, key, destination, max_bytes)
+        )
 
     async def check_ready(self) -> None:
         """Confirm the configured private bucket is reachable."""

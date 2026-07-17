@@ -184,6 +184,9 @@ def test_private_quote_upload_http_flow_and_cross_buyer_concealment() -> None:
         )
         assert submitted.status_code == 200
         assert submitted.json()["status"] == "analyzing"
+        assert submitted.json()["latestAnalysis"]["status"] == "queued"
+        assert submitted.json()["latestAnalysis"]["requestVersion"] == 2
+        assert submitted.json()["latestAnalysis"]["assets"] == []
         ordinary = first.get(f"/api/v1/quote-requests/{quote_id}")
         assert ordinary.status_code == 200
         assert key not in ordinary.text

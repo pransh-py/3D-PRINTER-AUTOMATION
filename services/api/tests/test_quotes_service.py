@@ -13,7 +13,7 @@ from xxx_api.config import Settings
 from xxx_api.domain.auth import UserStatus
 from xxx_api.domain.quotes import ModelAssetStatus, QuoteRequestStatus
 from xxx_api.domain.roles import Role
-from xxx_api.models import AuditEvent, Base, User
+from xxx_api.models import AnalysisRun, AuditEvent, Base, OutboxEvent, User
 from xxx_api.services.quotes import (
     InvalidModelUploadError,
     QuoteRequestNotFoundError,
@@ -169,6 +169,20 @@ def test_quote_upload_is_private_idempotent_and_quarantined_before_submit() -> N
             )
             assert submitted.status is QuoteRequestStatus.ANALYZING
             assert submitted.version == 2
+            assert len(submitted.analysis_runs) == 1
+            assert submitted.analysis_runs[0].request_version == 2
+        async with sessions() as session:
+            runs = list(await session.scalars(select(AnalysisRun)))
+            outbox = list(await session.scalars(select(OutboxEvent)))
+            assert len(runs) == 1
+            assert len(outbox) == 1
+            assert outbox[0].topic == "analysis.requested"
+            assert outbox[0].aggregate_id == runs[0].id
+            assert outbox[0].payload == {
+                "analysis_run_id": str(runs[0].id),
+                "quote_request_id": str(quote.id),
+                "request_version": 2,
+            }
         async with sessions() as session:
             events = list(await session.scalars(select(AuditEvent)))
             serialized_details = dumps([event.details for event in events])

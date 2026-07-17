@@ -10,6 +10,7 @@ export type QuoteRequestStatus =
   | "draft"
   | "analyzing"
   | "analysis_failed"
+  | "analysis_ready"
   | "estimate_ready"
   | "owner_review"
   | "quoted"
@@ -23,6 +24,10 @@ export type ModelAssetStatus =
   | "rejected";
 
 export type ModelFormat = "stl" | "3mf" | "obj" | "step";
+
+export type AnalysisRunStatus = "queued" | "running" | "awaiting_profile" | "succeeded" | "failed";
+
+export type AnalysisAssetStatus = "validated" | "awaiting_profile" | "sliced" | "rejected";
 
 export type ModelAsset = Readonly<{
   id: string;
@@ -39,6 +44,37 @@ export type ModelAsset = Readonly<{
   createdAt: string;
 }>;
 
+export type AnalysisAssetResult = Readonly<{
+  assetId: string;
+  status: AnalysisAssetStatus;
+  detectedFormat: ModelFormat | null;
+  verifiedSha256: string | null;
+  dimensionsUm: readonly [number, number, number] | null;
+  triangleCount: number | null;
+  objectCount: number | null;
+  fitsBuildVolume: boolean | null;
+  warningCodes: readonly string[];
+  filamentMg: number | null;
+  durationSeconds: number | null;
+  failureCode: string | null;
+}>;
+
+export type AnalysisRun = Readonly<{
+  id: string;
+  requestVersion: number;
+  status: AnalysisRunStatus;
+  attemptCount: number;
+  validatorVersion: string;
+  slicerName: string | null;
+  slicerVersion: string | null;
+  profileSha256: string | null;
+  queuedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  failureCode: string | null;
+  assets: readonly AnalysisAssetResult[];
+}>;
+
 export type QuoteRequest = Readonly<{
   id: string;
   buyerId: string;
@@ -48,6 +84,7 @@ export type QuoteRequest = Readonly<{
   createdAt: string;
   updatedAt: string;
   assets: readonly ModelAsset[];
+  latestAnalysis: AnalysisRun | null;
 }>;
 
 export type QuoteRequestList = Readonly<{
@@ -189,6 +226,7 @@ const QUOTE_REQUEST_STATUSES = new Set<string>([
   "draft",
   "analyzing",
   "analysis_failed",
+  "analysis_ready",
   "estimate_ready",
   "owner_review",
   "quoted",
@@ -204,6 +242,109 @@ const MODEL_ASSET_STATUSES = new Set<string>([
 ]);
 
 const MODEL_FORMATS = new Set<string>(["stl", "3mf", "obj", "step"]);
+
+const ANALYSIS_RUN_STATUSES = new Set<string>([
+  "queued",
+  "running",
+  "awaiting_profile",
+  "succeeded",
+  "failed",
+]);
+
+const ANALYSIS_ASSET_STATUSES = new Set<string>([
+  "validated",
+  "awaiting_profile",
+  "sliced",
+  "rejected",
+]);
+
+const HEX_SHA256_PATTERN = /^[0-9a-f]{64}$/;
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const ISO_TIMESTAMP_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
+const UTC_OFFSET_PATTERN = /^[+-](\d{2}):(\d{2})$/;
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1;
+}
+
+function isNullableHex64(value: unknown): value is string | null {
+  return value === null || (typeof value === "string" && HEX_SHA256_PATTERN.test(value));
+}
+
+function isDimensionsTriple(value: unknown): value is readonly [number, number, number] {
+  return Array.isArray(value) && value.length === 3 && value.every(isNonNegativeInteger);
+}
+
+/** Strict RFC 4122 UUID shape check, used for the analysis run and asset-result identifiers. */
+function isUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+/**
+ * Validates a "Z" or numeric UTC-offset suffix. Offset hours must be 00-14 and minutes 00-59,
+ * with hour 14 permitting only minute 00 (the widest real-world UTC offset is +14:00).
+ */
+function isValidUtcOffset(offset: string): boolean {
+  if (offset === "Z") {
+    return true;
+  }
+  const match = UTC_OFFSET_PATTERN.exec(offset);
+  if (match === null) {
+    return false;
+  }
+  const [, hourText, minuteText] = match;
+  const hours = Number(hourText);
+  const minutes = Number(minuteText);
+  if (hours > 14 || minutes > 59) {
+    return false;
+  }
+  if (hours === 14 && minutes !== 0) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Strict ISO-8601 timestamp check accepting the backend's "Z" or numeric UTC-offset forms and
+ * rejecting impossible calendar, clock, or offset values (e.g. month 13, February 30, hour 24,
+ * offset +99:99).
+ */
+function isIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const match = ISO_TIMESTAMP_PATTERN.exec(value);
+  if (match === null) {
+    return false;
+  }
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, offsetText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  if (month < 1 || month > 12) {
+    return false;
+  }
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (day < 1 || day > daysInMonth || hour > 23 || minute > 59 || second > 59) {
+    return false;
+  }
+  return isValidUtcOffset(offsetText);
+}
+
+function isNullableIsoTimestamp(value: unknown): value is string | null {
+  return value === null || isIsoTimestamp(value);
+}
 
 function parseModelAsset(payload: unknown): ModelAsset {
   if (
@@ -241,6 +382,81 @@ function parseModelAsset(payload: unknown): ModelAsset {
   };
 }
 
+function parseAnalysisAssetResult(payload: unknown): AnalysisAssetResult {
+  if (
+    !isRecord(payload) ||
+    !isUuid(payload.assetId) ||
+    typeof payload.status !== "string" ||
+    !ANALYSIS_ASSET_STATUSES.has(payload.status) ||
+    (payload.detectedFormat !== null &&
+      (typeof payload.detectedFormat !== "string" || !MODEL_FORMATS.has(payload.detectedFormat))) ||
+    !isNullableHex64(payload.verifiedSha256) ||
+    (payload.dimensionsUm !== null && !isDimensionsTriple(payload.dimensionsUm)) ||
+    (payload.triangleCount !== null && !isNonNegativeInteger(payload.triangleCount)) ||
+    (payload.objectCount !== null && !isNonNegativeInteger(payload.objectCount)) ||
+    (payload.fitsBuildVolume !== null && typeof payload.fitsBuildVolume !== "boolean") ||
+    !Array.isArray(payload.warningCodes) ||
+    !payload.warningCodes.every((code) => typeof code === "string") ||
+    (payload.filamentMg !== null && !isNonNegativeInteger(payload.filamentMg)) ||
+    (payload.durationSeconds !== null && !isNonNegativeInteger(payload.durationSeconds)) ||
+    (payload.failureCode !== null && typeof payload.failureCode !== "string")
+  ) {
+    throw new QuoteApiError("The quote service returned an invalid analysis result.", 502);
+  }
+  return {
+    assetId: payload.assetId,
+    status: payload.status as AnalysisAssetStatus,
+    detectedFormat: payload.detectedFormat as ModelFormat | null,
+    verifiedSha256: payload.verifiedSha256 as string | null,
+    dimensionsUm: payload.dimensionsUm as readonly [number, number, number] | null,
+    triangleCount: payload.triangleCount as number | null,
+    objectCount: payload.objectCount as number | null,
+    fitsBuildVolume: payload.fitsBuildVolume as boolean | null,
+    warningCodes: payload.warningCodes as readonly string[],
+    filamentMg: payload.filamentMg as number | null,
+    durationSeconds: payload.durationSeconds as number | null,
+    failureCode: payload.failureCode as string | null,
+  };
+}
+
+function parseAnalysisRun(payload: unknown): AnalysisRun {
+  if (
+    !isRecord(payload) ||
+    !isUuid(payload.id) ||
+    !isPositiveInteger(payload.requestVersion) ||
+    typeof payload.status !== "string" ||
+    !ANALYSIS_RUN_STATUSES.has(payload.status) ||
+    !isNonNegativeInteger(payload.attemptCount) ||
+    typeof payload.validatorVersion !== "string" ||
+    payload.validatorVersion.length === 0 ||
+    (payload.slicerName !== null && typeof payload.slicerName !== "string") ||
+    (payload.slicerVersion !== null && typeof payload.slicerVersion !== "string") ||
+    !isNullableHex64(payload.profileSha256) ||
+    !isIsoTimestamp(payload.queuedAt) ||
+    !isNullableIsoTimestamp(payload.startedAt) ||
+    !isNullableIsoTimestamp(payload.completedAt) ||
+    (payload.failureCode !== null && typeof payload.failureCode !== "string") ||
+    !Array.isArray(payload.assets)
+  ) {
+    throw new QuoteApiError("The quote service returned an invalid analysis response.", 502);
+  }
+  return {
+    id: payload.id,
+    requestVersion: payload.requestVersion,
+    status: payload.status as AnalysisRunStatus,
+    attemptCount: payload.attemptCount,
+    validatorVersion: payload.validatorVersion,
+    slicerName: payload.slicerName as string | null,
+    slicerVersion: payload.slicerVersion as string | null,
+    profileSha256: payload.profileSha256 as string | null,
+    queuedAt: payload.queuedAt,
+    startedAt: payload.startedAt as string | null,
+    completedAt: payload.completedAt as string | null,
+    failureCode: payload.failureCode as string | null,
+    assets: payload.assets.map(parseAnalysisAssetResult),
+  };
+}
+
 function parseQuoteRequest(payload: unknown): QuoteRequest {
   if (
     !isRecord(payload) ||
@@ -252,7 +468,8 @@ function parseQuoteRequest(payload: unknown): QuoteRequest {
     (payload.submittedAt !== null && typeof payload.submittedAt !== "string") ||
     typeof payload.createdAt !== "string" ||
     typeof payload.updatedAt !== "string" ||
-    !Array.isArray(payload.assets)
+    !Array.isArray(payload.assets) ||
+    (payload.latestAnalysis !== null && !isRecord(payload.latestAnalysis))
   ) {
     throw new QuoteApiError("The quote service returned an invalid response.", 502);
   }
@@ -265,6 +482,8 @@ function parseQuoteRequest(payload: unknown): QuoteRequest {
     createdAt: payload.createdAt,
     updatedAt: payload.updatedAt,
     assets: payload.assets.map(parseModelAsset),
+    latestAnalysis:
+      payload.latestAnalysis === null ? null : parseAnalysisRun(payload.latestAnalysis),
   };
 }
 

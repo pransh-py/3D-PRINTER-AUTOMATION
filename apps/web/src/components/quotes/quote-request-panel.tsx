@@ -7,6 +7,8 @@ import { AuthApiError, type AuthenticatedUser, getCurrentUserWithRefresh } from 
 import {
   MAX_MODEL_FILES_PER_QUOTE,
   MAX_MODEL_FILE_BYTES,
+  type AnalysisAssetResult,
+  type AnalysisRun,
   type ModelFileRejection,
   type QuoteRequest,
   type QuoteRequestList,
@@ -100,6 +102,8 @@ function quoteStatusLabel(status: QuoteRequestStatus): string {
       return "Analyzing — pending validation";
     case "analysis_failed":
       return "Analysis failed";
+    case "analysis_ready":
+      return "Model analysis ready";
     case "estimate_ready":
       return "Estimate ready for owner review";
     case "owner_review":
@@ -111,6 +115,55 @@ function quoteStatusLabel(status: QuoteRequestStatus): string {
     default:
       return status;
   }
+}
+
+function analysisStatusSummary(status: AnalysisRun["status"]): string {
+  switch (status) {
+    case "queued":
+      return "Validation queued";
+    case "running":
+      return "Validating models";
+    case "awaiting_profile":
+      return "Models passed source validation. An approved AD5X slicer profile is still required before slicing or estimating.";
+    case "succeeded":
+      return "Model analysis complete";
+    case "failed":
+      return "Model analysis needs review";
+    default:
+      return status;
+  }
+}
+
+function formatMillimetres(micrometres: number): string {
+  const millimetres = micrometres / 1000;
+  return Number.isInteger(millimetres) ? String(millimetres) : millimetres.toFixed(2);
+}
+
+function formatDimensionsMm(dimensionsUm: readonly [number, number, number]): string {
+  const [x, y, z] = dimensionsUm;
+  return `${formatMillimetres(x)} × ${formatMillimetres(y)} × ${formatMillimetres(z)} mm`;
+}
+
+function buildVolumeFitLabel(fitsBuildVolume: boolean | null): string {
+  if (fitsBuildVolume === null) {
+    return "not checked";
+  }
+  return fitsBuildVolume ? "fits" : "exceeds";
+}
+
+function analysisAssetSummary(asset: AnalysisAssetResult): string {
+  const parts: string[] = [];
+  if (asset.dimensionsUm !== null) {
+    parts.push(formatDimensionsMm(asset.dimensionsUm));
+  }
+  if (asset.triangleCount !== null) {
+    parts.push(`${asset.triangleCount.toLocaleString()} triangles`);
+  }
+  if (asset.objectCount !== null) {
+    parts.push(`${asset.objectCount} object${asset.objectCount === 1 ? "" : "s"}`);
+  }
+  parts.push(`Build volume: ${buildVolumeFitLabel(asset.fitsBuildVolume)}`);
+  return parts.join(" · ");
 }
 
 export function QuoteRequestPanel() {
@@ -402,11 +455,29 @@ export function QuoteRequestPanel() {
           <ul className={styles.recentList}>
             {recent.items.map((item) => (
               <li key={item.id} className={styles.recentRow}>
-                <span className={styles.recentStatus}>{quoteStatusLabel(item.status)}</span>
-                <span className={styles.recentMeta}>
-                  {item.assets.length} file{item.assets.length === 1 ? "" : "s"} ·{" "}
-                  {formatDate(item.createdAt)}
-                </span>
+                <div className={styles.recentHeader}>
+                  <span className={styles.recentStatus}>{quoteStatusLabel(item.status)}</span>
+                  <span className={styles.recentMeta}>
+                    {item.assets.length} file{item.assets.length === 1 ? "" : "s"} ·{" "}
+                    {formatDate(item.createdAt)}
+                  </span>
+                </div>
+                {item.latestAnalysis && (
+                  <div className={styles.analysis}>
+                    <p className={styles.analysisSummary}>
+                      {analysisStatusSummary(item.latestAnalysis.status)}
+                    </p>
+                    {item.latestAnalysis.assets.length > 0 && (
+                      <ul className={styles.analysisAssetList}>
+                        {item.latestAnalysis.assets.map((asset) => (
+                          <li key={asset.assetId} className={styles.analysisAssetRow}>
+                            {analysisAssetSummary(asset)}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
               </li>
             ))}
           </ul>

@@ -67,6 +67,12 @@ class QuoteRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         passive_deletes=True,
         order_by="ModelAsset.created_at",
     )
+    analysis_runs: Mapped[list[AnalysisRun]] = relationship(
+        back_populates="quote_request",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="AnalysisRun.request_version",
+    )
 
 
 class ModelAsset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -130,3 +136,6 @@ class ModelAsset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     storage_etag: Mapped[str | None] = mapped_column(Text)
 
     quote_request: Mapped[QuoteRequest] = relationship(back_populates="assets")
+
+
+from xxx_api.models.analysis import AnalysisRun  # noqa: E402

@@ -15,6 +15,7 @@ from xxx_api.dependencies import (
     get_runtime_settings,
     require_trusted_origin,
 )
+from xxx_api.models.analysis import AnalysisAssetResult, AnalysisRun
 from xxx_api.models.quotes import ModelAsset, QuoteRequest
 from xxx_api.rate_limit import (
     RateLimiter,
@@ -23,6 +24,8 @@ from xxx_api.rate_limit import (
     RateLimitUnavailableError,
 )
 from xxx_api.schemas.quotes import (
+    AnalysisAssetResultResponse,
+    AnalysisRunResponse,
     CreateModelUploadRequest,
     CreateQuoteRequest,
     ModelAssetResponse,
@@ -133,7 +136,54 @@ def _asset_response(asset: ModelAsset) -> ModelAssetResponse:
     )
 
 
+def _analysis_asset_response(result: AnalysisAssetResult) -> AnalysisAssetResultResponse:
+    dimensions = None
+    if (
+        result.dimension_x_um is not None
+        and result.dimension_y_um is not None
+        and result.dimension_z_um is not None
+    ):
+        dimensions = (
+            result.dimension_x_um,
+            result.dimension_y_um,
+            result.dimension_z_um,
+        )
+    return AnalysisAssetResultResponse(
+        assetId=result.model_asset_id,
+        status=result.status,
+        detectedFormat=result.detected_format,
+        verifiedSha256=result.verified_sha256,
+        dimensionsUm=dimensions,
+        triangleCount=result.triangle_count,
+        objectCount=result.object_count,
+        fitsBuildVolume=result.fits_build_volume,
+        warningCodes=result.warning_codes,
+        filamentMg=result.filament_mg,
+        durationSeconds=result.duration_seconds,
+        failureCode=result.failure_code,
+    )
+
+
+def _analysis_response(run: AnalysisRun) -> AnalysisRunResponse:
+    return AnalysisRunResponse(
+        id=run.id,
+        requestVersion=run.request_version,
+        status=run.status,
+        attemptCount=run.attempt_count,
+        validatorVersion=run.validator_version,
+        slicerName=run.slicer_name,
+        slicerVersion=run.slicer_version,
+        profileSha256=run.profile_sha256,
+        queuedAt=run.queued_at,
+        startedAt=run.started_at,
+        completedAt=run.completed_at,
+        failureCode=run.failure_code,
+        assets=[_analysis_asset_response(result) for result in run.asset_results],
+    )
+
+
 def _quote_response(quote: QuoteRequest) -> QuoteRequestResponse:
+    latest_analysis = quote.analysis_runs[-1] if quote.analysis_runs else None
     return QuoteRequestResponse(
         id=quote.id,
         buyerId=quote.buyer_id,
@@ -143,6 +193,9 @@ def _quote_response(quote: QuoteRequest) -> QuoteRequestResponse:
         createdAt=quote.created_at,
         updatedAt=quote.updated_at,
         assets=[_asset_response(asset) for asset in quote.assets],
+        latestAnalysis=(
+            _analysis_response(latest_analysis) if latest_analysis is not None else None
+        ),
     )
 
 

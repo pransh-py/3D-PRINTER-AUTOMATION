@@ -6,11 +6,11 @@
 - Purpose: A public 3D-printing storefront and operations platform for a Chennai business. Buyers upload models, receive system-generated estimates, await owner approval, pay by UPI, and track production and fulfillment. The owner manages quotations, verified payments, a single FlashForge AD5X print queue, and pickup/local-delivery/pan-India shipping.
 - Production expectations: Safe physical-printer control, trustworthy pricing, private model storage, auditable payment decisions, recoverable operations, and a usable one-week MVP without weakening security boundaries.
 - Tech stack: Next.js and TypeScript frontend; FastAPI/Python API; PostgreSQL; Redis-backed jobs; S3-compatible private object storage; isolated OrcaSlicer analysis; a Python Windows print bridge; Docker Compose for development.
-- Install commands: `npm --prefix apps/web install`; `python3.13 -m venv .venv313`; `.venv313/bin/pip install -e 'services/api[dev]'`.
-- Test commands: `.venv313/bin/pytest services/api/tests`; `npm --prefix apps/web run test`.
-- Lint commands: `.venv313/bin/ruff check services/api`; `npm --prefix apps/web run lint`.
-- Type-check commands: `.venv313/bin/mypy services/api/src`; `npm --prefix apps/web run typecheck`.
-- Development-server commands: `.venv313/bin/uvicorn xxx_api.main:app --app-dir services/api/src --reload --host 127.0.0.1 --port 8000`; `npm --prefix apps/web run dev`.
+- Install commands: `npm --prefix apps/web install`; `python3.13 -m venv .venv313`; `.venv313/bin/pip install -e 'services/api[dev]' -e 'services/worker[dev]'`.
+- Test commands: `.venv313/bin/pytest services/api/tests services/worker/tests`; `npm --prefix apps/web run test`.
+- Lint commands: `.venv313/bin/ruff check services/api services/worker`; `npm --prefix apps/web run lint`.
+- Type-check commands: `.venv313/bin/mypy services/api/src services/worker/src`; `npm --prefix apps/web run typecheck`.
+- Development-server commands: `.venv313/bin/uvicorn xxx_api.main:app --app-dir services/api/src --reload --host 127.0.0.1 --port 8000`; `.venv313/bin/xxx-worker`; `npm --prefix apps/web run dev`.
 - Architecture and product documents: `docs/PRODUCT_REQUIREMENTS.md`, `docs/ARCHITECTURE.md`, `docs/SECURITY.md`, and `docs/ROADMAP.md`.
 - Learning contract: Delivery mode. Codex may implement project code; explain architecture, security-sensitive behavior, operational setup, and owner actions clearly. Do not reserve code for the user to type unless they request it.
 

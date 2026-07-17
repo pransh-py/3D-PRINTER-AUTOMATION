@@ -38,6 +38,11 @@ production SMTP/Redis smoke testing and deployment owner enrollment remain relea
 
 Exit gate: approved sample models produce repeatable results; malicious/invalid/oversized samples fail closed; one buyer cannot access another's model.
 
+Current status: private upload intake, transactional analysis enqueueing, fenced Redis Stream
+delivery, bounded source validation, and buyer-safe analysis status UI are implemented. Real
+Orca-Flashforge slicing, previews, and repeatability comparison remain blocked on owner-exported
+AD5X machine/process/filament profiles and representative test models.
+
 ## Day 3: pricing, quotation, and order snapshots
 
 - Implement versioned materials, rates, profiles, pricing policy, and integer-money calculator.

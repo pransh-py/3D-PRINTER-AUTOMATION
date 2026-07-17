@@ -9,6 +9,7 @@ class QuoteRequestStatus(StrEnum):
     DRAFT = "draft"
     ANALYZING = "analyzing"
     ANALYSIS_FAILED = "analysis_failed"
+    ANALYSIS_READY = "analysis_ready"
     ESTIMATE_READY = "estimate_ready"
     OWNER_REVIEW = "owner_review"
     QUOTED = "quoted"
@@ -32,3 +33,22 @@ class ModelFormat(StrEnum):
     THREE_MF = "3mf"
     OBJ = "obj"
     STEP = "step"
+
+
+class AnalysisRunStatus(StrEnum):
+    """Durable orchestration states for one immutable quote version."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    AWAITING_PROFILE = "awaiting_profile"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class AnalysisAssetStatus(StrEnum):
+    """Bounded result state for one model in one analysis run."""
+
+    VALIDATED = "validated"
+    AWAITING_PROFILE = "awaiting_profile"
+    SLICED = "sliced"
+    REJECTED = "rejected"

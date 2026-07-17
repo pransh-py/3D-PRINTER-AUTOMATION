@@ -2,26 +2,28 @@
 
 Public 3D-printing ordering and operations platform for a Chennai business using a FlashForge AD5X.
 
-The repository is in the foundation phase. Product and safety contracts live in [`docs/`](docs/), the public web application lives in [`apps/web`](apps/web), and the API lives in [`services/api`](services/api).
+The repository is under active MVP development. Product and safety contracts live in
+[`docs/`](docs/), the public web application lives in [`apps/web`](apps/web), and the API lives
+in [`services/api`](services/api).
 
 ## Prerequisites
 
 - Node.js 24 or newer
 - npm 11 or newer
 - Python 3.13
-- Docker with Compose for PostgreSQL, Redis, MinIO, and Mailpit (optional until persistence work begins)
+- Docker with Compose for PostgreSQL, Redis, MinIO, and Mailpit
 
 ## Install
 
 ```sh
 npm --prefix apps/web install
 python3.13 -m venv .venv313
-.venv313/bin/pip install -e 'services/api[dev]'
+.venv313/bin/pip install -e 'services/api[dev]' -e 'services/worker[dev]'
 ```
 
 ## Run locally
 
-Start the pinned development dependencies when Docker is available:
+Start the pinned development dependencies:
 
 ```sh
 docker compose up -d
@@ -44,6 +46,18 @@ Web, in a separate terminal:
 ```sh
 npm --prefix apps/web run dev
 ```
+
+Analysis worker, in another terminal after migrations and the development services are ready:
+
+```sh
+.venv313/bin/xxx-worker
+```
+
+The development worker independently hashes and validates uploaded STL, 3MF, OBJ, and STEP
+sources. It stops at `awaiting_profile` until the owner supplies reviewed AD5X machine, process,
+and filament profiles; it does not fabricate print time, filament use, or price. Development uses
+the credential-scrubbed subprocess mode. Production configuration must select the Bubblewrap
+sandbox with absolute reviewed executable paths to add OS-level network and process isolation.
 
 The web application is available at `http://localhost:3000`. Next.js proxies browser
 requests under `/api/v1` to `http://127.0.0.1:8000` by default so session cookies stay
@@ -83,9 +97,9 @@ It must not equal the JWT signing or token-hash secret.
 ## Verify
 
 ```sh
-.venv313/bin/ruff check services/api
-.venv313/bin/mypy services/api/src
-.venv313/bin/pytest services/api/tests
+.venv313/bin/ruff check services/api services/worker
+.venv313/bin/mypy services/api/src services/worker/src
+.venv313/bin/pytest services/api/tests services/worker/tests
 npm --prefix apps/web run lint
 npm --prefix apps/web run test
 npm --prefix apps/web run typecheck
@@ -94,12 +108,11 @@ npm --prefix apps/web run build
 
 ## Development services
 
-Authentication requires Redis for distributed rate limits and Mailpit for local verification/reset email. After Docker is installed:
+Authentication requires Redis for distributed rate limits and Mailpit for local
+verification/reset email. Private model intake requires MinIO. The root `compose.yaml` is the
+single local-development definition and binds service ports to loopback only. Its credentials
+must never be reused in production.
 
-```sh
-docker compose -f infra/compose.yaml up -d
-```
-
-The compose file is for local development only. Its credentials must never be reused in production.
-
-Mailpit's local inbox is available at `http://localhost:8025`. Production requires a real HTTPS web URL, sender address, and SMTP provider configuration; the API rejects the development defaults in production mode.
+Mailpit's local inbox is available at `http://localhost:8025`. Production requires a real HTTPS
+web URL, sender address, SMTP provider, private storage, and non-development credentials; the API
+rejects development defaults in production mode.

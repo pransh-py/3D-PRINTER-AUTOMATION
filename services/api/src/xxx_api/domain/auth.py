@@ -45,3 +45,8 @@ class AuditEventType(StrEnum):
     MODEL_UPLOAD_COMPLETED = "quote.model_upload_completed"
     MODEL_UPLOAD_REJECTED = "quote.model_upload_rejected"
     QUOTE_REQUEST_SUBMITTED = "quote.request_submitted"
+    ANALYSIS_RUN_QUEUED = "analysis.run_queued"
+    ANALYSIS_RUN_STARTED = "analysis.run_started"
+    ANALYSIS_RUN_AWAITING_PROFILE = "analysis.run_awaiting_profile"
+    ANALYSIS_RUN_SUCCEEDED = "analysis.run_succeeded"
+    ANALYSIS_RUN_FAILED = "analysis.run_failed"
