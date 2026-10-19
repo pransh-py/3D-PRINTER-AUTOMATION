@@ -271,3 +271,29 @@ The same private journal remains in use. Evidence is in ignored
 `.local/preview/lan-host-verification.json`. No print was submitted for these checks.
 An independent-device network check and browser interaction remain unverified; the
 previously saved browser-origin denial was respected.
+
+## Customer-style live printer demonstration
+
+The inline bed/nozzle/filament checkbox has been removed from the customer form.
+With a supported PLA colour selected, the existing `Slice & print automatically` action
+asks for operator confirmation only when pressed. It names the selected file, material,
+colour and quantity. Cancel returns before hashing, uploading or submitting a job.
+The slicing-only action asks for no physical confirmation. Backend readiness/profile
+checks still apply; clicking a print action continues through real Orca slicing,
+persisted pricing and the existing commissioned printer transport.
+
+For the demonstration, refresh `/print`, upload your own STL/OBJ, choose settings, open
+the review step and select `Slice & print automatically`. The operator confirms in the
+dialog. Follow the activity through slicing, starting and printing, and verify motion
+at the printer. A completed estimate or accepted upload alone is not evidence of printing.
+
+The refreshed LAN and localhost builds passed TypeScript, targeted ESLint and production
+compilation. Both websites and the proxied status API respond, with PLA approved, the
+printer ready and no active job. An isolated run of the current station pipeline against
+the installed Orca and configured PLA profile produced a 20 mm cube at 4 g, 784 seconds
+and INR 14.18. Its 3MF/G-code hashes matched, with all printer-driver access disabled.
+Downloads of an existing cube's files through the LAN proxy also returned 200 and matched
+the stored hashes. Evidence is in ignored `.local/preview/customer-demo-*.json`.
+These checks submitted no job to the live website or printer. Browser click-through and
+a new physical print are left to the owner's website test; the saved browser denial
+was respected. The known native busy response above remains an integration limitation.

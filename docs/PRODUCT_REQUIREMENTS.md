@@ -294,6 +294,12 @@ controls. It adds no public internet hosting, accounts or business checkout. Exi
 profile approvals, one-active-job protection and per-print readiness checks still apply.
 The owner will submit print jobs personally through the website.
 
+For customer-style testing, the owner requested that the inline printer-readiness
+checkbox be removed. Real printing stays available, with a fresh operator confirmation
+only after choosing the action that starts a print. Cancelling sends no upload or start;
+slicing for an estimate requires no operator confirmation. The backend readiness
+attestation and commissioned-profile checks remain enforced.
+
 ### October 19 delivery correction
 
 #### Robu-style standalone configurator (afternoon correction)

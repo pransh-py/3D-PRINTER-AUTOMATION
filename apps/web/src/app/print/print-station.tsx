@@ -103,7 +103,6 @@ export default function PrintStation({
   const [rotation, setRotation] = useState({ x: "0", y: "0" });
   const [stats, setStats] = useState<ModelStats | null>(null);
   const [step, setStep] = useState(0);
-  const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const submission = useRef<{ token: string; payload: string } | null>(null);
@@ -179,13 +178,18 @@ export default function PrintStation({
     }
     setFile(candidate);
     setStats(null);
-    setReady(false);
     setMessage("");
     submission.current = null;
   }
 
   async function submit(printNow: boolean) {
     if (!file || !station || busy || active || outsideBuildVolume) return;
+    const readinessConfirmed = printNow
+      ? window.confirm(
+          `Start printing ${file.name} in ${material} ${colour} (${quantity} ${quantity === 1 ? "copy" : "copies"})?\n\nOperator: confirm the plate is installed and clear, the 0.4 mm nozzle and selected filament/IFS mapping are correct, and someone is supervising the printer.`,
+        )
+      : false;
+    if (printNow && !readinessConfirmed) return;
     setBusy(true);
     setMessage("Checking model integrity and uploading…");
     try {
@@ -203,7 +207,7 @@ export default function PrintStation({
         supports,
         model,
         print_now: printNow,
-        readiness_confirmed: printNow && ready,
+        readiness_confirmed: readinessConfirmed,
       };
       const fingerprint = JSON.stringify(base);
       if (!submission.current || submission.current.payload !== fingerprint)
@@ -237,7 +241,6 @@ export default function PrintStation({
       setMessage(
         "Model received. Follow the live job below; do not submit it again.",
       );
-      setReady(false);
       await refresh();
     } catch (error) {
       setMessage(
@@ -406,7 +409,6 @@ export default function PrintStation({
                     checked={model.sourceUnit === unit}
                     onChange={() => {
                       setModel({ ...model, sourceUnit: unit });
-                      setReady(false);
                     }}
                   />
                   {unit === "mm" ? "Millimetres" : "Inches"}
@@ -461,7 +463,6 @@ export default function PrintStation({
                     return;
                   }
                   setModel({ ...model, rotationX: x, rotationY: y });
-                  setReady(false);
                   setMessage("");
                 }}
               >
@@ -548,7 +549,6 @@ export default function PrintStation({
                               checked={layer === value}
                               onChange={() => {
                                 setLayer(value);
-                                setReady(false);
                               }}
                             />
                             <span>
@@ -595,7 +595,6 @@ export default function PrintStation({
                                     onClick={() => {
                                       setMaterial(type);
                                       setColour(name);
-                                      setReady(false);
                                     }}
                                   >
                                     {material === type && colour === name && (
@@ -626,7 +625,6 @@ export default function PrintStation({
                                   checked={infill === value}
                                   onChange={() => {
                                     setInfill(value);
-                                    setReady(false);
                                   }}
                                 />
                                 {value}%
@@ -640,7 +638,6 @@ export default function PrintStation({
                             checked={supports}
                             onChange={(event) => {
                               setSupports(event.target.checked);
-                              setReady(false);
                             }}
                           />
                           Generate supports for overhangs
@@ -683,7 +680,6 @@ export default function PrintStation({
                             value={quantity}
                             onChange={(event) => {
                               setQuantity(Number(event.target.value));
-                              setReady(false);
                             }}
                           />
                         </label>
@@ -696,20 +692,6 @@ export default function PrintStation({
                             ? "Printer starts enabled. This action can heat and move the printer."
                             : "Slicing-only mode. No printer commands will be sent."}
                         </p>
-                        {physical && (
-                          <label className={styles.check}>
-                            <input
-                              type="checkbox"
-                              checked={ready}
-                              onChange={(event) =>
-                                setReady(event.target.checked)
-                              }
-                            />
-                            I checked the bed is clear, the 0.4 mm nozzle and
-                            selected filament/IFS mapping are correct, and
-                            someone is supervising the printer.
-                          </label>
-                        )}
                         <button
                           type="button"
                           className={styles.primary}
@@ -724,7 +706,7 @@ export default function PrintStation({
                             !Number.isInteger(quantity) ||
                             quantity < 1 ||
                             quantity > 10 ||
-                            (physical && (!ready || !printerReady))
+                            (physical && !printerReady)
                           }
                           onClick={() => void submit(physical)}
                         >
