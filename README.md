@@ -16,6 +16,11 @@ The local print station requires no account, cart, payment service, Docker, Post
   before each physical print. A downloaded or sliced file does not start printing by itself.
 - Optional access from other trusted devices on the same LAN.
 
+In **Review & print**, choose **Get estimate** to slice the model and see the estimated
+total before committing to a print. The next action is **Print for INR …**, with operator
+confirmation. It prints those same prepared files at the accepted estimate. Changing the
+model or print settings requires a new estimate.
+
 ## Current Windows installation
 
 Next.js runs on Windows. FastAPI and **OrcaSlicer 2.4.2** run inside Ubuntu WSL.

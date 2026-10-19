@@ -239,3 +239,13 @@ inputs. Rates are configured under the existing station lock with the `rates` CL
 an explicit flag can add estimates to previously unpriced slices without replacing existing
 snapshots. These two-component estimates do not implement a tax, fulfillment or payment policy.
 The confirmed local rates are documented in `PRODUCT_REQUIREMENTS.md`.
+
+The buyer website obtains a slice-only job before offering to print. The review panel
+shows its persisted estimate, tied to the current file selection and all model/print
+options. `POST /api/printer/jobs/{job_id}/start` accepts the expected total, a fresh
+idempotency token and operator readiness. A SQLite transaction claims that sliced job
+under the existing one-active-job index. The dispatcher rechecks profile approval,
+preparation context, file hashes and live printer readiness, then sends the original
+prepared artifact under the usual durable start intent. No second upload, slice or
+price calculation occurs. Retries return the existing authorization without dispatch;
+changed authorizations and any previously started estimate cannot start again.

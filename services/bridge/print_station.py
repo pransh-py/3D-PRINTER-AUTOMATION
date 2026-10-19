@@ -140,6 +140,12 @@ class PrintOptions(StrictModel):
     readiness_confirmed: StrictBool = False
 
 
+class StartOptions(StrictModel):
+    client_token: UUID
+    expected_total_paise: StrictInt = Field(ge=0)
+    readiness_confirmed: StrictBool
+
+
 class Journal:
     def __init__(self, path: Path):
         self.path = path
@@ -216,6 +222,42 @@ class Journal:
                 raise HTTPException(
                     409, "Finish or resolve the current job before submitting another."
                 ) from error
+        return job, True
+
+    def claim_start(self, job_id: str, authorization: StartOptions):
+        payload = authorization.model_dump(mode="json")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT data FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                raise HTTPException(404, "Job not found.")
+            job = json.loads(row[0])
+            if job.get("print_authorization"):
+                if job["print_authorization"] == payload:
+                    return job, False
+                raise HTTPException(
+                    409, "This estimate already has a print request. Check activity."
+                )
+            if job["phase"] != "sliced" or job.get("start_intent"):
+                raise HTTPException(
+                    409, "Only an unprinted, successfully sliced estimate can start."
+                )
+            if (job.get("estimate") or {}).get("total_paise") != authorization.expected_total_paise:
+                raise HTTPException(409, "The accepted price does not match this estimate.")
+            job.update(
+                phase="starting",
+                print_authorization=payload,
+                start_requested=time.time(),
+                updated=time.time(),
+                message="Checking the accepted estimate before printing.",
+            )
+            try:
+                db.execute(
+                    "UPDATE jobs SET phase=?,data=? WHERE id=?",
+                    (job["phase"], json.dumps(job), job_id),
+                )
+            except sqlite3.IntegrityError as error:
+                raise HTTPException(409, "Finish or resolve the active job first.") from error
         return job, True
 
     def update(self, job_id: str, **changes):
@@ -331,6 +373,19 @@ class Station:
         task = asyncio.create_task(coroutine)
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
+
+    def preparation_context(self, options: PrintOptions):
+        connection = self.config.printer
+        mapping = (
+            connection.mappings.get(f"{options.material}:{options.colour}") if connection else None
+        )
+        return {
+            "base_profile_sha256": self.config.profiles[options.material].sha256,
+            "slicer_sha256": self.config.slicer_sha256,
+            "bed_type": self.config.bed_type,
+            "mapping": mapping.model_dump() if mapping else None,
+            "transport": connection.transport if connection else None,
+        }
 
     async def process(self, job_id: str):
         job = self.journal.get(job_id)
@@ -449,6 +504,7 @@ class Station:
                 estimate=estimate_slice(
                     self.config.pricing, sliced.filament_mg, sliced.duration_seconds
                 ),
+                preparation_context=self.preparation_context(options),
             )
             if not options.print_now:
                 self.journal.update(
@@ -457,42 +513,7 @@ class Station:
                     message="Slicing complete. No printer command was sent.",
                 )
                 return
-            self.validate_options(options)
-            if time.time() - job["created"] > 600:
-                raise PrinterError(
-                    "Readiness confirmation expired during processing. No print was sent."
-                )
-            assert self.driver is not None
-            mapping = self.mapping(options)
-            status = await asyncio.to_thread(self.driver.status)
-            slot = self.driver.require_ready(
-                status,
-                slot=mapping.slot,
-                material=options.material,
-                colour_hex=mapping.colour_hex,
-            )
-            # All prerequisites above precede the durable intent. Never retry below this line.
-            moonraker = isinstance(self.driver, MoonrakerLan)
-            suffix = "gcode" if moonraker else "3mf"
-            printer_filename = f"pf_{job_id}_{package_hash[:12]}.{suffix}"
-            self.journal.update(
-                job_id,
-                phase="starting",
-                start_intent=time.time(),
-                printer_filename=printer_filename,
-                message="Sending this job once to the AD5X. Do not resubmit.",
-            )
-            await asyncio.to_thread(
-                self.driver.upload_and_print,
-                print_artifact if moonraker else package,
-                filename=printer_filename,
-                slot=slot,
-            )
-            self.journal.update(
-                job_id,
-                phase="awaiting_start",
-                message="Printer accepted the upload; waiting for matching live print status.",
-            )
+            await self.dispatch_prepared(job_id, options, confirmed_at=job["created"])
         except asyncio.CancelledError:
             physical = bool(self.journal.get(job_id).get("start_intent"))
             self.journal.update(
@@ -532,6 +553,81 @@ class Station:
                 message=message,
                 failure_code=error.code if isinstance(error, ModelValidationError) else None,
             )
+
+    async def dispatch_prepared(self, job_id: str, options: PrintOptions, *, confirmed_at: float):
+        self.validate_options(options)
+        job = self.journal.get(job_id)
+        if job.get("preparation_context") != self.preparation_context(options):
+            raise PrinterError("Printer preparation changed. Get a new estimate before printing.")
+        scratch = self.directory / job_id
+        package = scratch / "result.3mf"
+        print_artifact = scratch / job["gcode_name"]
+        for path, expected in (
+            (package, job["package_sha256"]),
+            (print_artifact, job["gcode_sha256"]),
+        ):
+
+            def matches_artifact(path=path, expected=expected):
+                if not path.is_file() or path.is_symlink():
+                    return False
+                with path.open("rb") as stream:
+                    return file_digest(stream, "sha256").hexdigest() == expected
+
+            if not await asyncio.to_thread(matches_artifact):
+                raise PrinterError("The prepared file changed or is missing. Get a new estimate.")
+        if time.time() - confirmed_at > 600:
+            raise PrinterError("Readiness confirmation expired. No print was sent.")
+        assert self.driver is not None
+        mapping = self.mapping(options)
+        status = await asyncio.to_thread(self.driver.status)
+        slot = self.driver.require_ready(
+            status, slot=mapping.slot, material=options.material, colour_hex=mapping.colour_hex
+        )
+        moonraker = isinstance(self.driver, MoonrakerLan)
+        suffix = "gcode" if moonraker else "3mf"
+        printer_filename = f"pf_{job_id}_{job['package_sha256'][:12]}.{suffix}"
+        # All checks precede the durable intent. Never retry below this line.
+        self.journal.update(
+            job_id,
+            phase="starting",
+            start_intent=time.time(),
+            printer_filename=printer_filename,
+            message="Sending this job once to the AD5X. Do not resubmit.",
+        )
+        await asyncio.to_thread(
+            self.driver.upload_and_print,
+            print_artifact if moonraker else package,
+            filename=printer_filename,
+            slot=slot,
+        )
+        self.journal.update(
+            job_id,
+            phase="awaiting_start",
+            message="Printer accepted the upload; waiting for matching live print status.",
+        )
+
+    async def print_sliced(self, job_id: str):
+        job = self.journal.get(job_id)
+        options = PrintOptions.model_validate(
+            {
+                **job["options"],
+                "print_now": True,
+                "readiness_confirmed": job["print_authorization"]["readiness_confirmed"],
+            }
+        )
+        try:
+            await self.dispatch_prepared(job_id, options, confirmed_at=job["start_requested"])
+        except (Exception, asyncio.CancelledError) as error:
+            physical = bool(self.journal.get(job_id).get("start_intent"))
+            self.journal.update(
+                job_id,
+                phase="needs_attention" if physical else "failed",
+                message=str(error)
+                if isinstance(error, (PrinterError, HTTPException))
+                else "Print preparation interrupted. Inspect the printer before retrying.",
+            )
+            if isinstance(error, asyncio.CancelledError):
+                raise
 
     def reconcile(self, status: PrinterStatus):
         for job in self.journal.all():
@@ -742,6 +838,23 @@ def create_app(
                 )
                 raise
             station.spawn(station.process(job["id"]))
+            return job
+
+    @app.post("/api/printer/jobs/{job_id}/start", status_code=202)
+    async def start(job_id: UUID, authorization: StartOptions):
+        async with station.submit_lock:
+            job = station.journal.get(job_id.hex)
+            options = PrintOptions.model_validate(
+                {
+                    **job["options"],
+                    "print_now": True,
+                    "readiness_confirmed": authorization.readiness_confirmed,
+                }
+            )
+            station.validate_options(options)
+            job, created = station.journal.claim_start(job_id.hex, authorization)
+            if created:
+                station.spawn(station.print_sliced(job_id.hex))
             return job
 
     @app.get("/api/printer/jobs/{job_id}/package")

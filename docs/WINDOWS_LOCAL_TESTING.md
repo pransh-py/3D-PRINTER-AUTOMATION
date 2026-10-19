@@ -275,16 +275,17 @@ previously saved browser-origin denial was respected.
 ## Customer-style live printer demonstration
 
 The inline bed/nozzle/filament checkbox has been removed from the customer form.
-With a supported PLA colour selected, the existing `Slice & print automatically` action
-asks for operator confirmation only when pressed. It names the selected file, material,
-colour and quantity. Cancel returns before hashing, uploading or submitting a job.
-The slicing-only action asks for no physical confirmation. Backend readiness/profile
-checks still apply; clicking a print action continues through real Orca slicing,
-persisted pricing and the existing commissioned printer transport.
+In Review & print, `Get estimate` uploads and slices the chosen model without dispatch.
+The estimated total appears in that same panel, followed by `Print for INR …` for
+commissioned materials. That action asks for operator confirmation of the file,
+price, material, colour and quantity. Cancel sends no start request. Changing the
+model, units, rotation, material/colour, quality, infill, supports or quantity invalidates
+the selected estimate. Starting uses its original prepared artifacts and saved price.
 
 For the demonstration, refresh `/print`, upload your own STL/OBJ, choose settings, open
-the review step and select `Slice & print automatically`. The operator confirms in the
-dialog. Follow the activity through slicing, starting and printing, and verify motion
+the review step and select `Get estimate`. Review the displayed total, then choose
+`Print for INR …`. The operator confirms in the dialog. Follow activity through starting
+and printing, and verify motion
 at the printer. A completed estimate or accepted upload alone is not evidence of printing.
 
 The refreshed LAN and localhost builds passed TypeScript, targeted ESLint and production
@@ -297,3 +298,11 @@ the stored hashes. Evidence is in ignored `.local/preview/customer-demo-*.json`.
 These checks submitted no job to the live website or printer. Browser click-through and
 a new physical print are left to the owner's website test; the saved browser denial
 was respected. The known native busy response above remains an integration limitation.
+
+The estimate-first update passed 53 station tests, including checks for mismatched
+prices, changed files/profiles/plate/mapping, disabled or unapproved printing, active-job
+conflicts and duplicate/ambiguous starts. The opt-in test also passed with real Orca
+and a loopback printer simulator: two 0.10 mm cubes produced 8.10 g and 1,898 seconds.
+No upload occurred before price acceptance; exactly one G-code upload followed, preserving
+the quoted file hashes and estimate. This used a disposable journal and simulated driver,
+never the physical printer or live website's submission API.

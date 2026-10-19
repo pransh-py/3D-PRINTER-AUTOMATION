@@ -102,7 +102,10 @@ export default function PrintStation({
   const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [selectionId, setSelectionId] = useState(0);
+  const [quoted, setQuoted] = useState<{ jobId: string; key: string } | null>(null);
   const submission = useRef<{ token: string; payload: string } | null>(null);
+  const startSubmission = useRef<{ jobId: string; token: string } | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const refresh = useCallback(async () => {
     const response = await fetch("/api/printer/status", { cache: "no-store" });
@@ -160,6 +163,26 @@ export default function PrintStation({
   );
   const printerReady =
     station?.printer && ["ready", "completed"].includes(station.printer.state);
+  const configurationKey = JSON.stringify({
+    selectionId,
+    material,
+    colour,
+    layer,
+    infill,
+    quantity,
+    supports,
+    model,
+  });
+  const quoteJob =
+    quoted?.key === configurationKey
+      ? station?.jobs.find((job) => job.id === quoted.jobId)
+      : undefined;
+  const estimate = quoteJob?.estimate;
+  const quoteReady = quoteJob?.phase === "sliced" && Boolean(estimate);
+  const estimating = Boolean(
+    (busy && !estimate) ||
+    (quoteJob && ["uploading", "validating", "slicing"].includes(quoteJob.phase)),
+  );
 
   function selectFile(candidate?: File) {
     if (!candidate) return;
@@ -174,20 +197,17 @@ export default function PrintStation({
       return;
     }
     setFile(candidate);
+    setSelectionId((value) => value + 1);
+    setQuoted(null);
     setStats(null);
     setMessage("");
     submission.current = null;
   }
 
-  async function submit(printNow: boolean) {
+  async function submit() {
     if (!file || !station || busy || active || outsideBuildVolume) return;
-    const readinessConfirmed = printNow
-      ? window.confirm(
-          `Start printing ${file.name} in ${material} ${colour} (${quantity} ${quantity === 1 ? "copy" : "copies"})?\n\nOperator: confirm the plate is installed and clear, the 0.4 mm nozzle and selected filament/IFS mapping are correct, and someone is supervising the printer.`,
-        )
-      : false;
-    if (printNow && !readinessConfirmed) return;
     setBusy(true);
+    setQuoted(null);
     setMessage("Checking model integrity and uploading…");
     try {
       const bytes = await file.arrayBuffer();
@@ -203,8 +223,8 @@ export default function PrintStation({
         quantity,
         supports,
         model,
-        print_now: printNow,
-        readiness_confirmed: readinessConfirmed,
+        print_now: false,
+        readiness_confirmed: false,
       };
       const fingerprint = JSON.stringify(base);
       if (!submission.current || submission.current.payload !== fingerprint)
@@ -235,14 +255,69 @@ export default function PrintStation({
             ? result.detail
             : "The station rejected these settings.",
         );
-      setMessage(
-        "Model received. Follow the live job below; do not submit it again.",
-      );
+      setQuoted({ jobId: result.id, key: configurationKey });
+      submission.current = null;
+      setMessage("Model received. Review the estimated total before choosing to print.");
       await refresh();
     } catch (error) {
       setMessage(
         (error instanceof Error ? error.message : "Connection lost.") +
           " Check the job list before retrying. An uncertain physical start is never resent.",
+      );
+      void refresh().catch(() => {});
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startPrint() {
+    if (
+      !station ||
+      !quoteJob ||
+      !quoteReady ||
+      !estimate ||
+      !physical ||
+      !printerReady ||
+      busy ||
+      active
+    )
+      return;
+    if (
+      !window.confirm(
+        `Print ${quoteJob.options.filename} for ${money(estimate.total_paise)}?\n\n${material} ${colour} · ${quantity} ${quantity === 1 ? "copy" : "copies"}.\n\nOperator: confirm the plate is installed and clear, the 0.4 mm nozzle and selected filament/IFS mapping are correct, and someone is supervising the printer.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setMessage("Starting your prepared print…");
+    try {
+      if (startSubmission.current?.jobId !== quoteJob.id) {
+        startSubmission.current = { jobId: quoteJob.id, token: submissionId() };
+      }
+      const response = await fetch(`/api/printer/jobs/${quoteJob.id}/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Station-Token": station.token,
+        },
+        body: JSON.stringify({
+          client_token: startSubmission.current.token,
+          expected_total_paise: estimate.total_paise,
+          readiness_confirmed: true,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          typeof result.detail === "string" ? result.detail : "The print could not be started.",
+        );
+      }
+      setMessage("Print requested at the displayed price. Follow its live progress below.");
+      await refresh();
+    } catch (error) {
+      setMessage(
+        (error instanceof Error ? error.message : "Connection lost.") +
+        " Check activity before retrying; a print is never resent.",
       );
       void refresh().catch(() => {});
     } finally {
@@ -680,6 +755,25 @@ export default function PrintStation({
                             }}
                           />
                         </label>
+                        <div
+                          className={styles.reviewEstimate}
+                          role="status"
+                          aria-live="polite"
+                        >
+                          <span>Estimated total</span>
+                          <strong>{estimate ? money(estimate.total_paise) : "—"}</strong>
+                          <p>
+                            {estimating
+                              ? "Slicing your model to calculate the price…"
+                              : estimate
+                                ? "For your selected quantity. Additional services, tax and delivery are not included."
+                                : !file
+                                  ? "Upload a model to get your estimate."
+                                  : quoted && quoted.key !== configurationKey
+                                    ? "Settings changed. Get an updated estimate before printing."
+                                    : "Get an estimate to see the price before you print."}
+                          </p>
+                        </div>
                         <button
                           type="button"
                           className={styles.primary}
@@ -694,19 +788,23 @@ export default function PrintStation({
                             !Number.isInteger(quantity) ||
                             quantity < 1 ||
                             quantity > 10 ||
-                            (physical && !printerReady)
+                            (quoteReady && physical && !printerReady)
                           }
-                          onClick={() => void submit(physical)}
+                          onClick={() =>
+                            void (quoteReady && physical ? startPrint() : submit())
+                          }
                         >
                           {busy
-                            ? "Uploading…"
-                            : physical
-                              ? "Slice & print automatically →"
-                              : station?.pricing
-                                ? "Slice & estimate →"
-                                : "Slice model →"}
+                            ? "Please wait…"
+                            : estimating
+                              ? "Calculating estimate…"
+                              : quoteReady && physical && estimate
+                                ? `Print for ${money(estimate.total_paise)} →`
+                                : station?.pricing
+                                  ? "Get estimate →"
+                                  : "Slice model →"}
                         </button>
-                        {physical && (
+                        {quoteReady && physical && (
                           <button
                             type="button"
                             className={styles.secondary}
@@ -718,9 +816,9 @@ export default function PrintStation({
                               !available ||
                               Boolean(connectionError)
                             }
-                            onClick={() => void submit(false)}
+                            onClick={() => void submit()}
                           >
-                            Slice only · do not print
+                            Recalculate estimate
                           </button>
                         )}
                         {!available && (

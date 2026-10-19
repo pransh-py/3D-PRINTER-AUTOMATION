@@ -547,6 +547,32 @@
   padding: 14px 16px;
   overflow-wrap: anywhere;
 }
+.reviewEstimate {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px 16px;
+  margin-top: 24px;
+  padding: 20px;
+  background: var(--soft);
+  border-radius: 6px;
+}
+.reviewEstimate > span {
+  color: var(--muted);
+  align-self: center;
+  font-size: 13px;
+}
+.reviewEstimate strong {
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.6px;
+}
+.reviewEstimate p {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+}
 .primary {
   width: 100%;
   margin-top: 12px;

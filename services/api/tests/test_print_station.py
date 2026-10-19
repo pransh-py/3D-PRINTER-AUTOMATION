@@ -319,6 +319,139 @@ def test_full_station_job_duplicate_and_ambiguous_start_never_resends(
                 assert station.journal.get(job_id)["phase"] == "completed"
 
 
+@pytest.mark.parametrize(
+    "issue,expected_http,expected_phase",
+    [
+        ("none", 202, "awaiting_start"),
+        ("ambiguous", 202, "needs_attention"),
+        ("rates_changed", 202, "awaiting_start"),
+        ("wrong_price", 409, "sliced"),
+        ("not_ready", 422, "sliced"),
+        ("artifact_changed", 202, "failed"),
+        ("mapping_changed", 202, "failed"),
+        ("plate_changed", 202, "failed"),
+        ("profile_changed", 202, "failed"),
+        ("unapproved", 409, "sliced"),
+        ("disabled", 409, "sliced"),
+        ("another_active", 409, "sliced"),
+        ("no_estimate", 409, "sliced"),
+    ],
+)
+def test_estimate_then_print_reuses_accepted_bytes_and_price_once(
+    tmp_path, monkeypatch, issue, expected_http, expected_phase
+):
+    slices = []
+
+    async def fixture_slice(self, source, scratch, *, quantity=1):
+        slices.append(quantity)
+        (scratch / "result.3mf").write_bytes(b"PREPARED PACKAGE FIXTURE")
+        artifact = scratch / "approved.gcode"
+        artifact.write_bytes(b"; FIXTURE\n; filament_colour = #FF0000\n; filament_type = PLA\n")
+        return SliceResult(artifact, sha256(artifact.read_bytes()).hexdigest(), 1000, 60, "a" * 64)
+
+    monkeypatch.setattr("services.bridge.print_station.OrcaSlicer.slice", fixture_slice)
+    with simulated_printer(moonraker=True, ambiguous=issue == "ambiguous") as (port, events, _):
+        config = configuration(tmp_path)
+        config.pricing = StationPricing(
+            material_rate_paise_per_gram=300, machine_rate_paise_per_hour=1000
+        )
+        config.printer.transport = "moonraker"
+        config.printer.zmod_start_reviewed = True
+        driver = MoonrakerLan("127.0.0.1", port=port, allow_loopback_test=True)
+        app = create_app(config, tmp_path / "jobs", enable_printer=True, driver=driver)
+        with TestClient(app, base_url="http://127.0.0.1:8123") as client:
+            station = app.state.station
+            headers = {"Origin": "http://127.0.0.1:3102", "X-Station-Token": station.token}
+            chosen = options(print_now=False)
+            response = client.post(
+                "/api/printer/jobs",
+                content=SOURCE,
+                headers={**headers, "X-Print-Options": chosen.model_dump_json()},
+            )
+            assert response.status_code == 202
+            job_id = response.json()["id"]
+
+            async def wait_phase(phases):
+                for _ in range(200):
+                    job = station.journal.get(job_id)
+                    if job["phase"] in phases:
+                        return job
+                    await asyncio.sleep(0.01)
+                raise AssertionError("Prepared-print fixture timed out")
+
+            job = client.portal.call(wait_phase, {"sliced", "failed"})
+            assert job["phase"] == "sliced", job
+            assert job["estimate"]["total_paise"] == 317
+            assert not any(event[0] == "/server/files/upload" for event in events)
+            prepared = (tmp_path / "jobs" / job_id / job["gcode_name"]).read_bytes()
+            payload = {
+                "client_token": str(uuid4()),
+                "expected_total_paise": 317,
+                "readiness_confirmed": True,
+            }
+            endpoint = f"/api/printer/jobs/{job_id}/start"
+            assert client.post(endpoint, json=payload).status_code == 403
+            assert (
+                client.post(
+                    endpoint, json=payload, headers={**headers, "Origin": "https://evil.example"}
+                ).status_code
+                == 403
+            )
+            if issue == "wrong_price":
+                payload["expected_total_paise"] = 1
+            elif issue == "not_ready":
+                payload["readiness_confirmed"] = False
+            elif issue == "artifact_changed":
+                (tmp_path / "jobs" / job_id / job["gcode_name"]).write_bytes(b"TAMPERED")
+            elif issue == "mapping_changed":
+                config.printer.mappings["PLA:red"].slot = 2
+            elif issue == "plate_changed":
+                config.bed_type = "High Temp Plate"
+            elif issue == "profile_changed":
+                profile = config.profiles["PLA"]
+                process = profile.directory / "process.json"
+                process.write_text(
+                    json.dumps({**json.loads(process.read_bytes()), "wall_loops": "3"})
+                )
+                digest = sha256()
+                for name in ("machine.json", "process.json", "filament.json"):
+                    digest.update(name.encode() + b"\0" + (profile.directory / name).read_bytes())
+                profile.sha256 = digest.hexdigest()
+            elif issue == "unapproved":
+                config.profiles["PLA"].approved_for_printer = False
+            elif issue == "disabled":
+                station.enabled = False
+            elif issue == "another_active":
+                station.journal.create(options())
+            elif issue == "no_estimate":
+                station.journal.update(job_id, estimate=None)
+            elif issue == "rates_changed":
+                config.pricing.material_rate_paise_per_gram = 900
+            result = client.post(endpoint, json=payload, headers=headers)
+            assert result.status_code == expected_http, result.text
+            job = client.portal.call(wait_phase, {expected_phase})
+            uploads = [event for event in events if event[0] == "/server/files/upload"]
+            assert slices == [1], "Starting a quote must not re-slice it."
+            if issue in {"none", "ambiguous", "rates_changed"}:
+                assert len(uploads) == 1 and prepared in uploads[0][2]
+                assert job["estimate"]["total_paise"] == 317
+                assert client.post(endpoint, json=payload, headers=headers).status_code == 202
+                assert (
+                    client.post(
+                        endpoint, json={**payload, "client_token": str(uuid4())}, headers=headers
+                    ).status_code
+                    == 409
+                )
+                assert sum(event[0] == "/server/files/upload" for event in events) == 1
+                station.journal.recover()
+                assert station.journal.get(job_id)["phase"] == "needs_attention"
+                assert client.post(endpoint, json=payload, headers=headers).status_code == 202
+                assert sum(event[0] == "/server/files/upload" for event in events) == 1
+            else:
+                assert not uploads
+                assert not job.get("start_intent")
+
+
 def test_physical_start_disabled_and_unconfirmed_colours_rejected(tmp_path):
     config = configuration(tmp_path)
     config.printer = None
@@ -597,6 +730,7 @@ def test_real_orca_to_simulated_zmod_end_to_end(tmp_path):
     config = StationConfig.model_validate_json(
         Path(os.environ["PRINTFLOW_REAL_ORCA_CONFIG"]).read_bytes()
     )
+    config.web_port = 3102
     # These approvals exist only in this disposable simulator instance, not on disk.
     config.profiles["PLA"] = config.profiles["PLA"].model_copy(
         update={"approved_for_printer": True}
@@ -617,8 +751,7 @@ def test_real_orca_to_simulated_zmod_end_to_end(tmp_path):
         colour="red",
         layer_height="0.1",
         quantity=2,
-        print_now=True,
-        readiness_confirmed=True,
+        print_now=False,
     )
     with simulated_printer(moonraker=True) as (port, events, _):
         driver = MoonrakerLan("127.0.0.1", port=port, allow_loopback_test=True)
@@ -633,16 +766,33 @@ def test_real_orca_to_simulated_zmod_end_to_end(tmp_path):
             assert response.status_code == 202
             job_id = response.json()["id"]
 
-            async def wait_done():
+            async def wait_done(phases):
                 for _ in range(600):
                     job = app.state.station.journal.get(job_id)
-                    if job["phase"] in {"awaiting_start", "failed", "needs_attention"}:
+                    if job["phase"] in phases:
                         return job
                     await asyncio.sleep(0.1)
                 raise AssertionError("Real Orca acceptance timed out")
 
-            job = client.portal.call(wait_done)
+            quoted = client.portal.call(wait_done, {"sliced", "failed"})
+            assert quoted["phase"] == "sliced", quoted["message"]
+            assert quoted["estimate"]["total_paise"] > 0
+            assert not any(event[0] == "/server/files/upload" for event in events)
+            response = client.post(
+                f"/api/printer/jobs/{job_id}/start",
+                headers=headers,
+                json={
+                    "client_token": str(uuid4()),
+                    "expected_total_paise": quoted["estimate"]["total_paise"],
+                    "readiness_confirmed": True,
+                },
+            )
+            assert response.status_code == 202, response.text
+            job = client.portal.call(wait_done, {"awaiting_start", "failed", "needs_attention"})
             assert job["phase"] == "awaiting_start", job["message"]
+            assert job["gcode_sha256"] == quoted["gcode_sha256"]
+            assert job["package_sha256"] == quoted["package_sha256"]
+            assert job["estimate"] == quoted["estimate"]
             uploads = [event for event in events if event[0] == "/server/files/upload"]
             assert len(uploads) == 1
             assert b"; layer_height = 0.1" in uploads[0][2]

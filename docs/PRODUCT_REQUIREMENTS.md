@@ -305,6 +305,16 @@ or separate material/machine charges. It also omits the printer-start capability
 and internal single-plate/back-to-back-print explanation. Pricing calculations, quantity
 validation and operator confirmation at print start continue to apply.
 
+The buyer must see the sliced estimate inside Review & print before choosing to print.
+The website first uploads/slices without dispatch, then shows the total and a separate
+`Print for INR …` action. Model or settings changes invalidate the displayed estimate.
+`POST /api/printer/jobs/{job_id}/start` accepts a fresh UUID submission token, the
+expected total in integer paise and explicit operator readiness. It claims a sliced job
+atomically, verifies the stored price, current preparation context and artifact hashes,
+and dispatches those same prepared bytes once. It does not re-upload or re-slice the
+model or recalculate an accepted price. Conflicting starts, stale preparation, changed
+artifacts and unapproved profiles are rejected; ambiguous dispatch is never resent.
+
 ### October 19 delivery correction
 
 #### Robu-style standalone configurator (afternoon correction)
