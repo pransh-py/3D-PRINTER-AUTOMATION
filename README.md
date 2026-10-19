@@ -4,6 +4,12 @@ Current priority: **upload → configure → slice → automatically start one A
 No account, cart, payment, Docker, PostgreSQL or Redis is needed for this local path.
 The existing business site is preserved separately; it is not the printer-control UI.
 
+On the configured Windows computer, the site and WSL backend use
+**http://127.0.0.1:3100/print**. See [Windows local testing](docs/WINDOWS_LOCAL_TESTING.md)
+for restart commands, profile details and verified upload/slicing results.
+The local page now calculates estimates from actual slicing at the confirmed rates of
+**INR 3/g filament + INR 10/hour printing**, with a separate material/time breakdown.
+
 On this configured Mac, start:
 
 ```sh

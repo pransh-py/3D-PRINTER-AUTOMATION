@@ -1,5 +1,10 @@
 # Printer integration visit
 
+For the current **Windows + Ubuntu WSL setup on port 3100**, use
+[Windows printer setup](WINDOWS_PRINTER_SETUP.md). The Mac commands below describe the
+earlier machine; the commissioning sequence remains applicable. Current hardware status
+must be verified on the actual printer.
+
 ## Current task: simple local automation, not the business workflow
 
 Use **http://127.0.0.1:3102/print**, launched by:

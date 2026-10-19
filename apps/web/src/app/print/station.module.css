@@ -1,159 +1,245 @@
+.shell {
+  min-height: 100vh;
+  background: var(--paper);
+  padding-bottom: 1px;
+}
 .page {
-  max-width: 1200px;
-  margin: auto;
-  padding: 0 36px 52px;
+  width: min(1320px, calc(100% - 80px));
+  margin: 12px auto 48px;
+  padding: 32px;
   color: var(--ink);
-  font-family: Geist, Arial, sans-serif;
-}
-.header {
-  min-height: 96px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  border-bottom: 1px solid var(--line);
-}
-.brand {
-  text-decoration: none;
-  color: var(--ink);
-  font-size: 25px;
-  font-weight: 750;
-  letter-spacing: -1.2px;
-}
-.brand span {
-  display: block;
-  font-size: 9px;
-  letter-spacing: 2.5px;
-  font-weight: 500;
-  margin-top: 4px;
-}
-.connection {
-  border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: 30px;
-  padding: 8px 14px;
-  font-size: 12px;
-}
-.connection::before {
-  content: "";
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--muted);
-  margin-right: 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
 }
 .title {
-  margin: 42px 0 34px;
-}
-.title > p,
-.configHeading > span {
-  font-size: 10px;
-  letter-spacing: 2px;
-  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  margin: 0 0 28px;
 }
 .title h1 {
-  font-size: clamp(30px, 4vw, 44px);
-  letter-spacing: -1.8px;
+  margin: 0;
+  font-size: 32px;
   line-height: 1.15;
-  margin: 12px 0;
-  font-weight: 600;
+  font-weight: 550;
+  letter-spacing: -1.2px;
 }
-.title > span,
-.configHeading > p {
+.title p {
+  margin: 10px 0 0;
   color: var(--muted);
   font-size: 14px;
+  line-height: 1.5;
 }
+.connection {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  gap: 8px;
+  background: var(--soft);
+  padding: 10px 14px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.connection::before,
+.statusDot {
+  display: inline-block;
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.connection[data-connected="true"]::before {
+  background: #4f7651;
+}
+.connectionNotice {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  background: var(--soft);
+  padding: 16px 18px;
+  margin: 0 0 28px;
+  border-radius: 4px;
+}
+.connectionNotice .statusDot {
+  background: var(--orange);
+}
+.connectionNotice p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.connectionNotice button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  background: none;
+  border: 0;
+  padding: 8px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.connectionNotice button:hover {
+  color: var(--link);
+}
+.connectionNotice button svg {
+  width: 16px;
+  height: 16px;
+}
+/* A 1320px sheet has a 1254px canvas: 32px insets + 1px edges. Its two columns share 1222px after the 32px gap. */
 .columns {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 44px;
+  grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
+  gap: 32px;
   align-items: start;
 }
-.modelColumn {
+.modelColumn,
+.configuration {
   min-width: 0;
 }
+.panelHeading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 18px;
+}
+.panelHeading h2,
+.configHeading h2 {
+  font-size: 18px;
+  letter-spacing: -0.4px;
+  font-weight: 550;
+  margin: 0;
+}
+.panelHeading > span {
+  font-size: 12px;
+  color: var(--muted);
+}
 .preview {
-  border: 1px solid var(--line);
   background: var(--soft);
-  min-height: 360px;
-  border-radius: 12px;
+  min-height: 350px;
+  border-radius: 8px;
   overflow: hidden;
 }
 .preview figure {
-  border: 0;
   margin: 0;
+  border: 0;
   background: transparent;
+  border-radius: 0;
 }
 .preview figure > div {
-  height: 325px;
+  height: 320px;
 }
 .preview figure > figcaption {
-  font-size: 10px;
+  font-size: 12px;
   min-height: 34px;
-  padding: 8px 12px;
+  padding: 8px 14px;
+  background: var(--soft);
 }
 .empty {
-  min-height: 360px;
+  min-height: 350px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 25px;
+  padding: 28px;
   text-align: center;
 }
-.empty svg {
-  width: 100px;
-  height: 100px;
-  color: var(--orange);
-  margin: 0 0 22px;
+.uploadIcon {
+  color: var(--ink);
+  margin-bottom: 18px;
 }
-.empty h2 {
+.uploadIcon svg {
+  width: 40px;
+  height: 40px;
+}
+.empty h3 {
   font-size: 18px;
   font-weight: 500;
+  letter-spacing: -0.5px;
   margin: 0;
 }
 .empty p {
   font-size: 13px;
   color: var(--muted);
-  margin: 10px 0 16px;
+  margin: 12px 0 20px;
 }
-.empty span {
-  font-size: 10px;
+.empty > span {
   color: var(--muted);
-  letter-spacing: 1px;
+  font-size: 12px;
+  margin-top: 20px;
+}
+.browse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  min-height: 44px;
+  background: var(--ink);
+  color: var(--surface);
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 180ms;
+}
+.browse:hover {
+  background: var(--orange);
+  color: #fff;
 }
 .upload {
   width: 100%;
-  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--soft);
   color: var(--ink);
-  border: 1px dashed var(--orange);
-  border-radius: 6px;
-  padding: 13px;
-  margin-top: 13px;
+  border: 0;
+  border-radius: 4px;
+  min-height: 44px;
+  padding: 12px 16px;
+  margin-top: 12px;
   font: inherit;
   font-size: 13px;
   cursor: pointer;
 }
+.upload > svg:last-child {
+  margin-left: auto;
+}
+.upload:hover {
+  background: var(--line);
+}
 .hint {
-  font-size: 11px;
-  line-height: 1.7;
+  font-size: 12px;
+  line-height: 1.65;
   color: var(--muted);
   margin: 12px 0;
+  overflow-wrap: anywhere;
 }
 .units {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 20px;
   border: 0;
   padding: 0;
-  margin: 25px 0 20px;
-  font-size: 12px;
+  margin: 26px 0 20px;
+  font-size: 13px;
+  flex-wrap: wrap;
 }
 .units legend {
   float: left;
-  margin-right: 25px;
-  font-weight: 600;
+  margin-right: 20px;
+  font-weight: 550;
 }
 .units label,
 .rotation,
@@ -164,19 +250,19 @@
 }
 .page input[type="radio"],
 .page input[type="checkbox"] {
-  accent-color: var(--orange);
-  width: 15px;
-  height: 15px;
+  accent-color: var(--ink);
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 .rotation {
-  font-size: 12px;
+  font-size: 13px;
   gap: 12px;
   flex-wrap: wrap;
 }
 .rotation > span {
-  margin-right: 18px;
-  font-weight: 600;
+  margin-right: 12px;
+  font-weight: 550;
 }
 .rotation label {
   display: flex;
@@ -185,29 +271,40 @@
 }
 .rotation input,
 .quantity input {
-  width: 64px;
+  width: 60px;
+  min-height: 38px;
   padding: 8px;
   background: var(--surface);
   color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 4px;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
 }
 .rotation button,
 .secondary,
 .stepNav > button:not(.next),
 .jobActions button {
   border: 1px solid var(--line);
-  background: var(--soft);
+  background: var(--surface);
   color: var(--ink);
-  border-radius: 5px;
+  border-radius: 4px;
+  min-height: 38px;
   padding: 9px 16px;
   cursor: pointer;
-  font-size: 12px;
+  font: inherit;
+  font-size: 13px;
+}
+.rotation button:hover,
+.secondary:hover,
+.stepNav > button:not(.next):hover {
+  background: var(--soft);
 }
 .stats,
 .summary {
-  margin: 25px 0 0;
-  font-size: 12px;
+  margin: 20px 0 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 .stats > div,
 .summary > div {
@@ -215,7 +312,7 @@
   justify-content: space-between;
   gap: 15px;
   border-bottom: 1px solid var(--line);
-  padding: 14px 0;
+  padding: 13px 0;
 }
 .stats dt,
 .summary dt {
@@ -228,21 +325,16 @@
   overflow-wrap: anywhere;
 }
 .configHeading {
-  padding: 0 0 20px;
-}
-.configHeading h2 {
-  font-size: 29px;
-  letter-spacing: -1px;
-  font-weight: 600;
-  margin: 8px 0;
+  padding-bottom: 18px;
 }
 .configHeading > p {
+  color: var(--muted);
   font-size: 12px;
-  margin: 0;
+  margin: 6px 0 0;
 }
 .accordion {
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 8px;
   overflow: hidden;
   background: var(--surface);
 }
@@ -257,46 +349,44 @@
   align-items: center;
   width: 100%;
   border: 0;
-  padding: 18px 20px;
+  padding: 20px;
   color: var(--ink);
   background: transparent;
   text-align: left;
   cursor: pointer;
   gap: 14px;
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 550;
 }
-.accordion h3 i {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  border-radius: 50%;
-  border: 1px solid var(--line);
-  height: 24px;
-  width: 24px;
-  font-style: normal;
+.accordion h3 button[aria-expanded="true"] {
+  background: var(--soft);
 }
-.accordion h3 button[aria-expanded="true"] i {
-  background: var(--orange);
-  color: #fff;
-  border-color: var(--orange);
+.stepIcon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  color: var(--muted);
+}
+.stepIcon svg {
+  width: 20px;
+  height: 20px;
 }
 .accordion h3 small {
   display: block;
   font-weight: 400;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
-  margin-top: 4px;
+  margin-top: 5px;
+  line-height: 1.4;
 }
 .accordion h3 b {
   font-weight: 400;
-  font-size: 20px;
+  font-size: 22px;
   margin-left: auto;
 }
 .step {
-  padding: 0 22px 22px 58px;
+  padding: 18px 22px 22px;
 }
 .step[hidden] {
   display: none;
@@ -307,20 +397,27 @@
   margin: 0;
 }
 .step legend {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
-  margin-bottom: 14px;
+  margin-bottom: 4px;
 }
 .choice {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
-  font-size: 12px;
-  margin: 15px 0;
+  font-size: 14px;
+  padding: 12px;
+  margin-top: 8px;
   cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.choice:has(input:checked) {
+  border-color: var(--ink);
+  background: var(--paper);
 }
 .choice small {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted);
   display: block;
   margin-top: 4px;
@@ -329,74 +426,108 @@
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  margin-top: 24px;
+  margin-top: 22px;
 }
 .next,
 .primary {
-  background: var(--orange);
-  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  background: var(--ink);
+  color: var(--surface);
   border: 0;
-  border-radius: 5px;
+  border-radius: 4px;
   padding: 11px 20px;
   cursor: pointer;
-  font-weight: 550;
-  font-size: 12px;
+  font: inherit;
+  font-weight: 500;
+  font-size: 13px;
+  transition: background 180ms;
+}
+.next:hover,
+.primary:hover {
+  background: var(--orange);
+  color: #fff;
 }
 .material {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 15px;
-  padding: 14px 0;
+  padding: 18px 0;
   border-bottom: 1px solid var(--line);
 }
 .material strong {
-  font-size: 12px;
+  font-size: 14px;
 }
 .material small {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--muted);
-  max-width: 150px;
-  margin-top: 4px;
+  max-width: 190px;
+  margin-top: 5px;
 }
 .swatches {
   display: flex;
-  gap: 8px;
+  gap: 10px;
 }
 .swatches button {
-  width: 28px;
-  height: 28px;
-  border-radius: 5px;
-  border: 1px solid #809096;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid #7c837d;
   color: white;
-  text-shadow: 0 1px 3px #000;
   cursor: pointer;
+  font-size: 14px;
 }
 .swatches button[aria-pressed="true"] {
-  outline: 2px solid var(--orange);
+  outline: 2px solid var(--ink);
   outline-offset: 3px;
 }
 .infill {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 14px 8px;
-  font-size: 12px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  font-size: 13px;
+  margin-top: 12px;
 }
 .infill label {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
   cursor: pointer;
 }
+.infill label:has(input:checked) {
+  border-color: var(--ink);
+  background: var(--paper);
+}
+.infill input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.infill label:has(input:focus-visible) {
+  outline: 3px solid var(--orange);
+  outline-offset: 2px;
+}
 .check {
-  font-size: 11px;
-  line-height: 1.7;
+  font-size: 13px;
+  line-height: 1.65;
   align-items: flex-start;
   margin: 22px 0 16px;
 }
 .check input {
-  margin-top: 2px;
+  margin-top: 3px;
 }
 .summary {
   margin: 0;
@@ -406,20 +537,20 @@
   align-items: center;
   justify-content: space-between;
   margin-top: 18px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .notice {
   background: var(--soft);
-  border-left: 3px solid var(--orange);
-  font-size: 12px;
-  line-height: 1.7;
-  padding: 12px 15px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.65;
+  padding: 14px 16px;
   overflow-wrap: anywhere;
 }
 .primary {
   width: 100%;
   margin-top: 12px;
-  font-size: 13px;
+  font-size: 14px;
   padding: 15px;
 }
 .secondary {
@@ -437,9 +568,9 @@
   outline-offset: 4px;
 }
 .jobs {
-  margin-top: 42px;
+  margin-top: 36px;
   border-top: 1px solid var(--line);
-  padding-top: 24px;
+  padding-top: 28px;
 }
 .jobHeading {
   display: flex;
@@ -449,19 +580,70 @@
 }
 .jobHeading h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 550;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.4px;
 }
 .jobHeading > span {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
+}
+.costBreakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 32px;
+  margin: 18px 0 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.costBreakdown dt {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.costBreakdown dd {
+  margin: 5px 0 0;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.costTotal dd {
+  font-size: 20px;
+  font-weight: 600;
+}
+.emptyActivity {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-top: 20px;
+  padding: 20px;
+  border-radius: 8px;
+  background: var(--paper);
+}
+.emptyActivity > svg {
+  color: var(--muted);
+}
+.emptyActivity h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+.emptyActivity p {
+  margin: 5px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.emptyActivity > span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 .job {
   margin-top: 18px;
   padding: 20px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--surface);
   display: flex;
   justify-content: space-between;
@@ -472,9 +654,8 @@
 }
 .phase {
   color: var(--link);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  font-size: 12px;
+  text-transform: capitalize;
 }
 .job h3 {
   font-size: 14px;
@@ -482,13 +663,13 @@
   overflow-wrap: anywhere;
 }
 .job p {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.6;
   margin: 0 0 10px;
 }
 .job small {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 .jobActions {
   display: flex;
@@ -500,7 +681,7 @@
 }
 .jobActions a {
   color: var(--link);
-  font-size: 11px;
+  font-size: 13px;
 }
 .job progress {
   display: block;
@@ -510,37 +691,120 @@
 }
 .footer {
   display: flex;
+  min-height: 0;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 20px;
-  margin-top: 32px;
-  padding-top: 20px;
-  border-top: 1px solid var(--line);
-  font-size: 10px;
+  margin-top: 28px;
+  padding: 0;
+  border: 0;
+  font-size: 12px;
   color: var(--muted);
-  line-height: 1.7;
+  line-height: 1.6;
+}
+@media (max-width: 1100px) {
+  .page {
+    padding: 26px;
+  }
+  .columns {
+    gap: 26px;
+  }
+  .title h1 {
+    font-size: 30px;
+  }
+  .infill {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .panelHeading > span {
+    display: none;
+  }
 }
 @media (max-width: 800px) {
   .page {
-    padding: 0 20px 45px;
-  }
-  .header {
-    min-height: 78px;
+    width: calc(100% - 32px);
+    padding: 24px;
+    margin-top: 6px;
+    margin-bottom: 70px;
+    border-radius: 12px;
   }
   .title {
-    margin-top: 30px;
+    gap: 16px;
+    align-items: flex-start;
+    flex-direction: column;
+    margin-bottom: 22px;
+  }
+  .title h1 {
+    font-size: 28px;
+  }
+  .connection {
+    font-size: 12px;
+    padding: 8px 12px;
+  }
+  .connectionNotice {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 14px;
+    gap: 10px;
+  }
+  .connectionNotice > .statusDot {
+    margin-top: 7px;
+  }
+  .connectionNotice > p {
+    flex: 1;
+  }
+  .connectionNotice > button {
+    margin-left: 7px;
+    flex-basis: 100%;
+    justify-content: space-between;
+    padding: 4px 0 0;
   }
   .columns {
     grid-template-columns: 1fr;
-    gap: 26px;
+    gap: 28px;
+  }
+  .panelHeading > span {
+    display: block;
+    font-size: 11px;
   }
   .configHeading {
-    display: none;
+    padding-bottom: 18px;
   }
-  .preview {
-    min-height: 300px;
-  }
+  .preview,
   .empty {
     min-height: 300px;
+  }
+  .preview figure > div {
+    height: 300px;
+  }
+  .units {
+    gap: 14px;
+  }
+  .units legend {
+    margin-right: 14px;
+  }
+  .rotation > span {
+    margin-right: 4px;
+  }
+  .rotation input {
+    width: 53px;
+  }
+  .rotation {
+    gap: 10px;
+  }
+  .step {
+    padding-inline: 18px;
+  }
+  .infill {
+    grid-template-columns: repeat(5, 1fr);
+  }
+  .emptyActivity {
+    align-items: flex-start;
+  }
+  .emptyActivity > svg {
+    flex-shrink: 0;
+  }
+  .emptyActivity > span {
+    display: none;
   }
   .job {
     flex-direction: column;
@@ -548,15 +812,41 @@
   .jobActions {
     align-items: flex-start;
   }
-  .step {
-    padding-left: 24px;
-  }
   .footer {
     flex-direction: column;
-    gap: 5px;
+    gap: 10px;
   }
   .jobHeading {
     align-items: flex-start;
     flex-direction: column;
+  }
+}
+@media (max-width: 400px) {
+  .page {
+    padding: 20px;
+  }
+  .panelHeading > span {
+    display: none;
+  }
+  .empty {
+    padding: 22px 14px;
+  }
+  .empty h3 {
+    font-size: 16px;
+  }
+  .infill {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .swatches {
+    gap: 9px;
+  }
+  .swatches button {
+    width: 28px;
+    height: 28px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page * {
+    transition: none;
   }
 }

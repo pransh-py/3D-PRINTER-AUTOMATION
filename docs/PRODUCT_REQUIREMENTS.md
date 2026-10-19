@@ -8,12 +8,106 @@ payment or fulfilment prerequisite belongs on this path. Those existing modules 
 as future work, not the current user journey. Confirmed stock: PLA red/white/black; PETG black/orange.
 The new `/print` page and loopback station run separately from the commerce API and database.
 The friend's screenshot confirms ZMOD and working Orca-to-printer sending. "2.3.2" appears to
-answer the Orca-version question, not establish the printer firmware. No IP or credentials yet.
+answer the Orca-version question, not establish the printer firmware. The owner's LAN address
+was subsequently configured and read-only Moonraker status verified on October 20; no API key
+was required by the existing LAN configuration. Stock firmware remains unconfirmed; ZMOD's
+commissioning output reports USB 1.7.3 and updated version 1.7.3-83.
 
 The local verification explicitly uses a Textured PEI profile setting to exercise PETG;
-this is **not confirmation of the friend's physical build plate**. Profiles remain unapproved
-for real printing until the actual plate, nozzle, ZMOD configuration and filament are checked.
+this was initially **not confirmation of the friend's physical build plate**. The owner has
+subsequently confirmed Textured PEI, as recorded below. PLA was approved after the supervised
+cube commissioning described below; PETG remains unapproved for physical printing.
 Use hash-pinned, owner-reviewed working profiles, not made-up temperatures or printer macros.
+
+### Owner-confirmed printer setup — October 20, 2026
+
+The owner confirms a **0.4 mm nozzle**, **220 × 220 × 220 mm build volume**, **Textured PEI**
+plate, and PLA spools assigned as white in IFS slot 1, black in slot 2 and red in slot 3.
+Read-only `zmod_color` metadata agrees with these material/colour registrations and reports
+exact registered hex values `#FFFFFF`, `#161616`, and `#F72224`, respectively. Use these
+registered colours for the local mapping rather than assuming pure black/red preview values.
+
+This is the owner's physical-spool confirmation plus printer colour metadata, not a verified
+filament-presence reading: the initial status reported `ifs=false` and `hasFilament=false` for
+the slots, with the native screen active (`display=true`). Observed stored settings are
+`scan_file_colors=1`, `silent=1`, `auto_assign_colors=2`; this is not the stricter colour-match
+commissioning configuration described in the setup guide. No printer setting is changed by
+recording these observations. The owner supplied the Orca profile bundle described below;
+supervised ZMOD start/colour commissioning subsequently passed for PLA as recorded below.
+Keep uncommissioned material profiles disabled.
+
+### Owner-supplied Orca bundle — October 20, 2026
+
+The supplied `Flashforge AD5X 0.4 nozzle - M1.orca_printer.zip` contains the custom M1
+machine, `0.20mm Standard @FF AD5X - custom_name` process and `Numakers PLA` filament.
+Its SHA-256 is `db90047bc8ae245e4dd1e7754033406f618283d5be1e965f1e2b02484b2d44ad`.
+Keep the original and compiled profiles in private local runtime storage. Resolve the named
+vendor parents against the installed official Orca 2.4.2 resources, preserving the owner's
+explicit functional settings and start/end G-code. The export metadata says `2.3.2.60`;
+resolved inherited defaults therefore come from the installed version, not a claim of exact
+equivalence with that older version.
+
+The compiled PLA profile replaces the demo PLA profile for new slices. The station still
+applies the chosen layer height, infill, quantity, colour, support and confirmed plate settings.
+The exported filament cost field does not override the owner's INR 3/g + INR 10/hour rates.
+Old slice artifacts and estimate snapshots retain their original profile and measured values.
+PETG still uses its unapproved software-test profile.
+
+Real Orca tests pass at all three supported layer heights. The owner's generated start code
+has no explicit `G28` homing or `M109` nozzle-temperature wait. Preserve it rather than inventing
+replacement commands; verify the installed ZMOD start wrapper and actual colour selection
+under supervision before approving physical operation.
+
+### Supervised commissioning authorization — October 20, 2026
+
+The owner explicitly requested the small test print and subsequent website activation, then
+confirmed a clear installed bed, ready red PLA in slot 3 and a person beside the printer able
+to stop it. The commissioning job is the already verified 20 mm cube at 0.20 mm, 20% infill,
+one copy, supports off, Textured PEI, 220 C nozzle and 55 C initial bed from the supplied profile.
+Keep website starts disabled during this first operator-controlled commissioning run.
+Preserve a durable one-send intent and telemetry evidence; do not retry an ambiguous start.
+
+A non-moving `GET_ZCOLOR SILENT=1` query refreshed native-screen metadata and confirmed
+`ifs=true` with red PLA in slot 3. The earlier `ifs=false` value was cached and did not prove
+a disconnected IFS. Native-screen slot-presence fields from the general status object are
+still not authoritative. Installed `_PRINT_FILE`, `SDCARD_PRINT_FILE` and related ZMOD macros
+were inspected read-only. ZMOD's Moonraker fork routes native-screen starts through
+`_PRINT_FILE` and native `/printGcode`, rather than executing the exported purge sequence
+without the native preparation. Do not change the screen mode or inject guessed start code.
+
+Set only the documented `AUTO_ASSIGN_COLORS=30` strict matching policy (previously 2);
+scanning and silent-start are already 1. No temperature, purge, motion, firmware or screen
+setting is changed. After a successful supervised cube and confirmed red first layer,
+record PLA profile/start review and enable the website. PETG remains unapproved.
+
+The one-send test completed at 100% for its exact filename, with 737.56 seconds of reported
+print duration (native preparation is additional). The owner confirmed the red first layer
+and normal adhesion/motion. The native finish sequence subsequently turned off both heaters
+and reset SD/print status to idle. Keep the supplied start/end code unchanged: the bed's
+briefly retained target during finishing is not a persistent heater state.
+
+The regular approval commands recorded PLA profile approval and ZMOD start review. The
+backend now runs with `--enable-printer`. PLA red/white/black mappings are available with
+a fresh per-job operator readiness confirmation; PETG remains slicing-only. The physical
+test covered red slot 3, not a print in every offered colour. Activation never starts an
+old sliced estimate automatically. The API's readiness and unapproved-PETG guards were
+checked without sending another print.
+
+### Local estimate clarification — October 20, 2026
+
+The owner requested automatic monetary estimates after slicing and confirmed **INR 3 per gram
+of filament and INR 10 per printing hour**. Use these rates for the local station's offered
+materials; duration is proportional to measured seconds, not rounded up to whole hours.
+The estimate is material plus printing time, using Orca's measured filament and duration for
+the entire plate. Quantity is already included in those metrics and must not be multiplied
+again. Reuse pricing-v1 integer paise calculations, rounding each component upward to paise.
+No minimum, setup fee, tax, delivery or other adjustment has been supplied; these are outside
+this two-component estimate, not asserted to be free or tax-exempt.
+
+Store rates and the calculated breakdown with each successful slice. Existing unpriced slices
+may be estimated explicitly with the confirmed rates; changing rates must not rewrite prior
+estimate snapshots. Rates are private local configuration, never accepted from upload options.
+This adds estimates to the local path without requiring accounts, checkout or physical starts.
 
 The requirements below describe the preserved business workflow unless stated otherwise.
 

@@ -17,11 +17,6 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: process.cwd(),
   },
-  async redirects() {
-    return process.env.PRINTFLOW_PRINT_STATION === "1"
-      ? [{ source: "/", destination: "/print", permanent: false }]
-      : [];
-  },
   async rewrites() {
     return [
       ...(process.env.PRINTFLOW_PRINT_STATION === "1"

@@ -22,6 +22,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictBool, StrictInt
 from xxx_api.config import Settings
+from xxx_api.domain.pricing import PricingInputs, calculate_pricing_v1
 from xxx_api.print_presets import PROFILE_FILES, profile_settings, read_profile_bundle
 from xxx_api.schemas.model_options import ModelOptions
 from xxx_worker.model_transform import prepare_transformed_model
@@ -75,6 +76,39 @@ class Connection(StrictModel):
     mappings: dict[str, Mapping] = Field(default_factory=dict)
 
 
+class StationPricing(StrictModel):
+    material_rate_paise_per_gram: StrictInt = Field(ge=0, le=1_000_000_000)
+    machine_rate_paise_per_hour: StrictInt = Field(ge=0, le=1_000_000_000)
+
+
+def estimate_slice(pricing: StationPricing | None, filament_mg: int, duration_seconds: int):
+    """Price the entire measured plate; never multiply sliced metrics by quantity again."""
+    if pricing is None:
+        return None
+    breakdown = calculate_pricing_v1(
+        PricingInputs(
+            filament_mg=filament_mg,
+            duration_seconds=duration_seconds,
+            **pricing.model_dump(),
+            setup_fee_paise=0,
+            contingency_bps=0,
+            minimum_order_paise=0,
+            tax_bps=0,
+        )
+    )
+    return {
+        "currency": "INR",
+        "calculation_version": 1,
+        "rates": pricing.model_dump(),
+        "filament_mg": filament_mg,
+        "duration_seconds": duration_seconds,
+        "material_paise": breakdown.material_paise,
+        "machine_paise": breakdown.machine_paise,
+        "total_paise": breakdown.total_paise,
+        "created": time.time(),
+    }
+
+
 class StationConfig(StrictModel):
     slicer: Path
     slicer_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -82,6 +116,8 @@ class StationConfig(StrictModel):
     profiles: dict[Literal["PLA", "PETG"], Profile]
     bed_type: Literal["Textured PEI Plate", "High Temp Plate", "Cool Plate"] | None = None
     printer: Connection | None = None
+    web_port: StrictInt = Field(default=3102, ge=1024, le=65535)
+    pricing: StationPricing | None = None
 
 
 class PrintOptions(StrictModel):
@@ -334,6 +370,7 @@ class Station:
                     claimed_sha256=transformed_hash,
                     scratch_directory=scratch,
                 )
+            self.journal.update(job_id, dimensions_um=result.dimensions_um)
             if (
                 result.fits_build_volume is not True
                 or not result.dimensions_um
@@ -407,6 +444,9 @@ class Station:
                 gcode_name=print_artifact.name,
                 filament_mg=sliced.filament_mg,
                 duration_seconds=sliced.duration_seconds,
+                estimate=estimate_slice(
+                    self.config.pricing, sliced.filament_mg, sliced.duration_seconds
+                ),
             )
             if not options.print_now:
                 self.journal.update(
@@ -470,10 +510,25 @@ class Station:
                 if isinstance(error, (PrinterError, HTTPException))
                 else "Local processing failed. Check the configured profiles and station log."
             )
+            if (
+                isinstance(error, ModelValidationError)
+                and error.code == "model_outside_build_volume"
+            ):
+                dimensions = self.journal.get(job_id).get("dimensions_um")
+                if dimensions and all(value > 0 for value in dimensions):
+                    measured = " \u00d7 ".join(f"{value / 1000:.2f}" for value in dimensions)
+                    message = (
+                        f"Model size is {measured} mm. The AD5X build volume is "
+                        "220 \u00d7 220 \u00d7 220 mm. Export individual parts from a multi-part "
+                        "layout, resize in CAD, or correct the file units before uploading again."
+                    )
+                else:
+                    message = "The model has missing or zero dimensions. Export a solid STL or OBJ."
             self.journal.update(
                 job_id,
                 phase="needs_attention" if physical else "failed",
                 message=message,
+                failure_code=error.code if isinstance(error, ModelValidationError) else None,
             )
 
     def reconcile(self, status: PrinterStatus):
@@ -542,6 +597,8 @@ class Station:
 
 def create_app(config: StationConfig, directory: Path, *, enable_printer=False, driver=None):
     station = Station(config, directory, enable_printer=enable_printer, driver=driver)
+    web_host = f"127.0.0.1:{config.web_port}"
+    web_origin = f"http://{web_host}"
 
     @asynccontextmanager
     async def lifespan(app):
@@ -567,11 +624,11 @@ def create_app(config: StationConfig, directory: Path, *, enable_printer=False, 
         if (
             request.client is None
             or request.client.host not in {"127.0.0.1", "::1", "testclient"}
-            or request.headers.get("host") not in {"127.0.0.1:8123", "127.0.0.1:3102"}
+            or request.headers.get("host") not in {"127.0.0.1:8123", web_host}
         ):
             return JSONResponse({"detail": "Local print station only."}, status_code=403)
         if request.method not in {"GET", "HEAD"} and (
-            request.headers.get("origin") != "http://127.0.0.1:3102"
+            request.headers.get("origin") != web_origin
             or not hmac.compare_digest(request.headers.get("x-station-token", ""), station.token)
         ):
             return JSONResponse(
@@ -621,6 +678,7 @@ def create_app(config: StationConfig, directory: Path, *, enable_printer=False, 
             "token": station.token,
             "enabled": station.enabled,
             "bedType": config.bed_type,
+            "pricing": config.pricing.model_dump() if config.pricing else None,
             "stock": STOCK,
             "profiles": profiles,
             "printer": printer_status,

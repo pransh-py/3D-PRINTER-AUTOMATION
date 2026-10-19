@@ -8,6 +8,7 @@ import os
 import signal
 import subprocess
 import sys
+from decimal import Decimal, InvalidOperation
 from hashlib import file_digest
 from pathlib import Path
 from typing import Literal
@@ -24,10 +25,13 @@ from services.bridge.ad5x_lan import AD5XLan, PrinterError  # noqa: E402
 from services.bridge.moonraker_lan import MoonrakerLan  # noqa: E402
 from services.bridge.print_station import (  # noqa: E402
     Connection,
+    Journal,
     Mapping,
     Profile,
     StationConfig,
+    StationPricing,
     create_app,
+    estimate_slice,
 )
 
 DIRECTORY = ROOT / ".local" / "print-station"
@@ -64,8 +68,30 @@ def read_config():
     return StationConfig.model_validate_json(CONFIG.read_bytes())
 
 
+def rupees_to_paise(value):
+    try:
+        amount = Decimal(value)
+        if not amount.is_finite() or not 0 <= amount <= 10_000_000:
+            raise ValueError
+        paise = amount * 100
+        if paise != paise.to_integral_value():
+            raise ValueError
+        return int(paise)
+    except (InvalidOperation, ValueError):
+        raise argparse.ArgumentTypeError(
+            "Use non-negative rupees with up to two decimals."
+        ) from None
+
+
 def main():
+    global DIRECTORY, CONFIG
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--directory",
+        type=Path,
+        default=DIRECTORY,
+        help="Private station state directory (use the Linux filesystem under WSL).",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     init = commands.add_parser(
         "init", help="Pin a slicer and standalone base profiles; starts disabled."
@@ -74,6 +100,15 @@ def main():
     init.add_argument("--version", required=True)
     init.add_argument("--pla-manifest", required=True, type=Path)
     init.add_argument("--petg-manifest", type=Path)
+    init.add_argument("--web-port", type=int, default=3102)
+    rates = commands.add_parser("rates", help="Set material/time rates for slicing estimates.")
+    rates.add_argument("--filament-per-gram", type=rupees_to_paise, required=True)
+    rates.add_argument("--printing-per-hour", type=rupees_to_paise, required=True)
+    rates.add_argument(
+        "--include-existing",
+        action="store_true",
+        help="Estimate already-sliced jobs that have no estimate; preserve previous estimates.",
+    )
     plate = commands.add_parser(
         "plate", help="Select a build-plate type; revokes physical approvals."
     )
@@ -120,6 +155,8 @@ def main():
         "--optimized-web", action="store_true", help="Use an existing station-mode Next build."
     )
     args = parser.parse_args()
+    DIRECTORY = args.directory.expanduser().resolve()
+    CONFIG = DIRECTORY / "configuration.json"
     if args.command == "init":
         if CONFIG.exists():
             raise ValueError("A configuration already exists. Preserve it; do not reinitialize.")
@@ -147,11 +184,41 @@ def main():
                 slicer_sha256=digest,
                 slicer_version=args.version,
                 profiles=profiles,
+                web_port=args.web_port,
             )
         )
         print("Private station initialized. Starts disabled. Review profiles before physical use.")
         return
     config = read_config()
+    if args.command == "rates":
+        config.pricing = StationPricing(
+            material_rate_paise_per_gram=args.filament_per_gram,
+            machine_rate_paise_per_hour=args.printing_per_hour,
+        )
+        # Hold the station lock across configuration and the optional one-time backfill.
+        with (DIRECTORY / "station.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _persist_config(config)
+            count = 0
+            journal_path = DIRECTORY / "jobs" / "jobs.sqlite3"
+            if args.include_existing and journal_path.is_file():
+                journal = Journal(journal_path)
+                for job in journal.all():
+                    if (
+                        not job.get("estimate")
+                        and job.get("package_sha256")
+                        and job.get("filament_mg", 0) > 0
+                        and job.get("duration_seconds", 0) > 0
+                    ):
+                        journal.update(
+                            job["id"],
+                            estimate=estimate_slice(
+                                config.pricing, job["filament_mg"], job["duration_seconds"]
+                            ),
+                        )
+                        count += 1
+        print(f"Material/time estimate rates saved; {count} existing jobs estimated.")
+        return
     driver: AD5XLan | MoonrakerLan
     if args.command == "plate":
         config.bed_type = args.type
@@ -314,13 +381,13 @@ def main():
                         "--hostname",
                         "127.0.0.1",
                         "--port",
-                        "3102",
+                        str(config.web_port),
                     ],
                     cwd=ROOT / "apps" / "web",
                     env=environment,
                     start_new_session=True,
                 )
-            print("Local print station: http://127.0.0.1:3102/print")
+            print(f"Local print station: http://127.0.0.1:{config.web_port}/print")
             print(
                 "PHYSICAL STARTS ENABLED"
                 if args.enable_printer

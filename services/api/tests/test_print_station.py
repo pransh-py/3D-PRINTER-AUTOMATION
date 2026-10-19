@@ -16,6 +16,8 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from xxx_worker.slicing import SliceResult
+
 from services.bridge.ad5x_lan import AD5XLan, PrinterError, PrinterStatus
 from services.bridge.moonraker_lan import MoonrakerLan
 from services.bridge.print_station import (
@@ -25,10 +27,11 @@ from services.bridge.print_station import (
     PrintOptions,
     Profile,
     StationConfig,
+    StationPricing,
     create_app,
+    estimate_slice,
 )
 from services.bridge.zmod_gcode import prepare_zmod_gcode
-from xxx_worker.slicing import SliceResult
 
 
 @contextmanager
@@ -246,6 +249,9 @@ def test_full_station_job_duplicate_and_ambiguous_start_never_resends(
             )
         )
         config = configuration(tmp_path)
+        config.pricing = StationPricing(
+            material_rate_paise_per_gram=300, machine_rate_paise_per_hour=1000
+        )
         if moonraker:
             config.printer.transport = "moonraker"
             config.printer.zmod_start_reviewed = True
@@ -285,6 +291,9 @@ def test_full_station_job_duplicate_and_ambiguous_start_never_resends(
             client.portal.call(wait_done)
             job = app.state.station.journal.get(job_id)
             assert job["phase"] == ("needs_attention" if ambiguous else "awaiting_start"), job
+            assert job["estimate"]["material_paise"] == 300
+            assert job["estimate"]["machine_paise"] == 17
+            assert job["estimate"]["total_paise"] == 317
             again = client.post("/api/printer/jobs", content=SOURCE, headers=headers)
             assert again.status_code == 202 and again.json()["id"] == job_id
             upload_endpoint = "/server/files/upload" if moonraker else "/uploadGcode"
@@ -327,6 +336,169 @@ def test_physical_start_disabled_and_unconfirmed_colours_rejected(tmp_path):
             )
             assert response.status_code in {409, 422}
         assert not app.state.station.journal.all()
+
+
+@pytest.mark.parametrize("web_port", [3100, 3102])
+def test_station_accepts_only_the_configured_local_web_origin(tmp_path, web_port):
+    config = configuration(tmp_path)
+    config.printer = None
+    config.web_port = web_port
+    app = create_app(config, tmp_path / "jobs")
+    with TestClient(app, base_url=f"http://127.0.0.1:{web_port}") as client:
+        assert client.get("/api/printer/status").status_code == 200
+        headers = {
+            "Origin": f"http://127.0.0.1:{web_port}",
+            "X-Station-Token": app.state.station.token,
+        }
+        # An invalid body gets past the origin gate only for the configured origin.
+        assert client.post("/api/printer/jobs", headers=headers).status_code == 422
+        other_port = 3102 if web_port == 3100 else 3100
+        for origin in (f"http://127.0.0.1:{other_port}", "https://evil.example", "null"):
+            assert (
+                client.post("/api/printer/jobs", headers={**headers, "Origin": origin}).status_code
+                == 403
+            )
+        assert (
+            client.post(
+                "/api/printer/jobs", headers={**headers, "X-Station-Token": "wrong"}
+            ).status_code
+            == 403
+        )
+        assert (
+            client.get("/api/printer/status", headers={"Host": "evil.example"}).status_code == 403
+        )
+
+
+def test_oversized_upload_reports_measured_dimensions_before_slicing(tmp_path, monkeypatch):
+    async def must_not_slice(*args, **kwargs):
+        pytest.fail("An oversized model must not reach Orca.")
+
+    monkeypatch.setattr("services.bridge.print_station.OrcaSlicer.slice", must_not_slice)
+    config = configuration(tmp_path)
+    config.printer = None
+    source = SOURCE.replace(b"vertex 1 0 1", b"vertex 300 0 1")
+    chosen = options().model_copy(
+        update={"size": len(source), "source_sha256": sha256(source).hexdigest()}
+    )
+    app = create_app(config, tmp_path / "jobs")
+    with TestClient(app, base_url="http://127.0.0.1:8123") as client:
+        response = client.post(
+            "/api/printer/jobs",
+            content=source,
+            headers={
+                "Origin": "http://127.0.0.1:3102",
+                "X-Station-Token": app.state.station.token,
+                "X-Print-Options": chosen.model_dump_json(),
+            },
+        )
+        assert response.status_code == 202
+
+        async def wait_done():
+            for _ in range(100):
+                job = app.state.station.journal.get(response.json()["id"])
+                if job["phase"] == "failed":
+                    return job
+                await asyncio.sleep(0.02)
+            raise AssertionError("Validation timed out")
+
+        job = client.portal.call(wait_done)
+        assert job["failure_code"] == "model_outside_build_volume"
+        assert job["dimensions_um"] == [300000, 1000, 1000]
+        assert "300.00 \u00d7 1.00 \u00d7 1.00 mm" in job["message"]
+        assert "220 \u00d7 220 \u00d7 220 mm" in job["message"]
+        assert "Export individual parts" in job["message"]
+        assert not job.get("start_intent")
+
+
+@pytest.mark.parametrize(
+    ("filament_mg", "seconds", "material", "machine", "total"),
+    [(30850, 5253, 9255, 1460, 10715), (1500, 1800, 450, 500, 950), (1, 1, 1, 1, 2)],
+)
+def test_estimate_uses_measured_metrics_and_prorated_paise(
+    filament_mg, seconds, material, machine, total
+):
+    rates = StationPricing(material_rate_paise_per_gram=300, machine_rate_paise_per_hour=1000)
+    estimate = estimate_slice(rates, filament_mg, seconds)
+    assert estimate["material_paise"] == material
+    assert estimate["machine_paise"] == machine
+    assert estimate["total_paise"] == total
+    assert estimate["rates"] == rates.model_dump()
+    assert estimate["filament_mg"] == filament_mg
+    assert estimate["duration_seconds"] == seconds
+    assert estimate_slice(None, filament_mg, seconds) is None
+
+
+def test_rates_price_unpriced_jobs_and_preserve_previous_estimates(tmp_path, monkeypatch):
+    import fcntl
+
+    from tools import run_print_station as launcher
+
+    monkeypatch.setattr(launcher, "DIRECTORY", tmp_path)
+    monkeypatch.setattr(launcher, "CONFIG", tmp_path / "configuration.json")
+    config = configuration(tmp_path)
+    config.printer = None
+    launcher.write_config(config)
+    jobs = tmp_path / "jobs"
+    jobs.mkdir()
+    journal = Journal(jobs / "jobs.sqlite3")
+    job, _ = journal.create(options())
+    journal.update(
+        job["id"],
+        phase="sliced",
+        package_sha256="a" * 64,
+        filament_mg=30850,
+        duration_seconds=5253,
+    )
+
+    def set_rates(filament, hourly):
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "run_print_station.py",
+                "--directory",
+                str(tmp_path),
+                "rates",
+                "--filament-per-gram",
+                filament,
+                "--printing-per-hour",
+                hourly,
+                "--include-existing",
+            ],
+        )
+        launcher.main()
+
+    set_rates("3", "10")
+    estimate = journal.get(job["id"])["estimate"]
+    assert estimate["total_paise"] == 10715
+    set_rates("5", "20")
+    assert journal.get(job["id"])["estimate"] == estimate
+    assert launcher.read_config().pricing.material_rate_paise_per_gram == 500
+    with (tmp_path / "station.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(BlockingIOError):
+            set_rates("0", "0")
+    assert launcher.read_config().pricing.material_rate_paise_per_gram == 500
+    assert journal.get(job["id"])["estimate"] == estimate
+
+
+@pytest.mark.parametrize("invalid", ["-1", "nan", "inf", "0.001", "10000001"])
+def test_rate_cli_rejects_invalid_money(invalid):
+    import argparse
+
+    from tools.run_print_station import rupees_to_paise
+
+    with pytest.raises(argparse.ArgumentTypeError):
+        rupees_to_paise(invalid)
+    assert rupees_to_paise("3") == 300
+    assert rupees_to_paise("10.50") == 1050
+
+
+def test_client_cannot_supply_price_or_rates():
+    from pydantic import ValidationError
+
+    for field, value in (("pricing", {"material_rate_paise_per_gram": 0}), ("estimate", 0)):
+        with pytest.raises(ValidationError):
+            PrintOptions.model_validate({**options().model_dump(), field: value})
 
 
 def test_zmod_metadata_checksum_and_multitool_rejection(tmp_path):

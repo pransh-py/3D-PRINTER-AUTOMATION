@@ -197,8 +197,9 @@ Do not expose PostgreSQL, Redis, object storage administration, worker dashboard
 
 ## Current local print station (October 19 scope override)
 
-The owner deferred the business platform. `/print` on loopback port 3102 talks only to the
-local station on loopback 8123 through a development-only rewrite. The station validates a
+The owner deferred the business platform. `/print` on the configured loopback web port
+(default 3102, Windows test installation 3100) talks only to the local station on loopback
+8123 through an explicit station-mode rewrite, including optimized builds. The station validates a
 bounded STL/OBJ upload, preserves original bytes, applies explicit units/X-then-Y rotation,
 validates the resulting geometry, then runs hash-pinned Orca with standalone reviewed profiles.
 Only layer height, infill, supports, selected plate and filament-colour metadata are varied;
@@ -222,3 +223,11 @@ Only matching filename + live printing/heating/completed states advance the job.
 does not trigger another print. No arbitrary G-code console, movement, temperatures, firmware
 changes, cloud service, payments or public printer-control endpoint are exposed. The existing
 business architecture in the other sections is preserved separately, not required for local printing.
+
+The local station also supports an optional private material/time rate card. After actual
+slicing, pricing-v1 uses integer milligrams, seconds and paise to store an INR estimate
+snapshot with its exact rates and measured plate totals. The upload API cannot supply price
+inputs. Rates are configured under the existing station lock with the `rates` CLI command;
+an explicit flag can add estimates to previously unpriced slices without replacing existing
+snapshots. These two-component estimates do not implement a tax, fulfillment or payment policy.
+The confirmed local rates are documented in `PRODUCT_REQUIREMENTS.md`.

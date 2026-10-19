@@ -14,9 +14,12 @@ def resolve_profile(path: Path, resources: Path, expected_kind: str) -> dict:
     selected = json.loads(path.read_bytes())
     if not isinstance(selected, dict):
         raise ValueError("A profile must be a JSON object.")
-    kind = selected.get("type")
+    # Orca user exports omit type; the explicit --machine/--process/--filament argument
+    # supplies it. An explicitly conflicting type remains an error.
+    kind = selected.get("type", expected_kind)
     if kind != expected_kind:
         raise ValueError("The selected profile type does not match its argument.")
+    selected["type"] = kind
     index = {}
     candidates = list(resources.rglob("*.json"))
     if len(candidates) > 10000:
@@ -53,6 +56,31 @@ def resolve_profile(path: Path, resources: Path, expected_kind: str) -> dict:
     return merge(selected, ())
 
 
+def compile_profiles(
+    machine: Path, process: Path, filament: Path, resources: Path
+) -> dict[str, bytes]:
+    """Materialize settings and compile Orca identity metadata for standalone CLI use."""
+    paths = {"machine.json": machine, "process.json": process, "filament.json": filament}
+    resolved = {name: resolve_profile(path, resources, name[:-5]) for name, path in paths.items()}
+    source_machine = json.loads(machine.read_bytes())
+    machine_name = resolved["machine.json"].get("name")
+    parent = source_machine.get("inherits")
+    for value in resolved.values():
+        if str(value.get("from", "")).casefold() == "user":
+            # Orca CLI treats User without inherits as an unknown system identity.
+            # These compiled files contain all resolved values and are loaded independently;
+            # the original user export remains the provenance of the settings.
+            value["from"] = "system"
+    for name in ("process.json", "filament.json"):
+        compatible = resolved[name].get("compatible_printers")
+        if compatible and machine_name not in compatible:
+            if not isinstance(compatible, list) or not parent or parent not in compatible:
+                raise ValueError("The selected profiles are incompatible with this printer.")
+            # Retain the base's declared compatibility for this specific derived printer.
+            resolved[name]["compatible_printers"] = [*compatible, machine_name]
+    return {name: json.dumps(resolved[name], indent=2).encode() for name in PROFILE_FILES}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--resources", type=Path, required=True)
@@ -66,15 +94,7 @@ def main() -> None:
     parser.add_argument("--colours", nargs="*", default=[])
     args = parser.parse_args()
     try:
-        profiles = {
-            filename: json.dumps(
-                resolve_profile(
-                    getattr(args, filename[:-5]), args.resources, filename[:-5]
-                ),
-                indent=2,
-            ).encode()
-            for filename in PROFILE_FILES
-        }
+        profiles = compile_profiles(args.machine, args.process, args.filament, args.resources)
         displayed = profile_settings(profiles)
         output = args.output.resolve()
         output.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -99,7 +119,10 @@ def main() -> None:
                     "settings": displayed,
                     "profileSha256": digest.hexdigest(),
                     "manifest": str(output / "presets.json"),
-                    "reviewRequired": "Review the full profiles, loaded filament and a supervised test print before approving physical use. No printer was contacted.",
+                    "reviewRequired": (
+                        "Review the full profiles, loaded filament and a supervised test print "
+                        "before approving physical use. No printer was contacted."
+                    ),
                 },
                 indent=2,
             )
@@ -107,7 +130,8 @@ def main() -> None:
     except (OSError, ValueError, KeyError, TypeError):
         parser.exit(
             1,
-            "Preset preparation stopped. Check the selected profile files, inheritance and new output directory.\n",
+            "Preset preparation stopped. Check the selected profile files, "
+            "inheritance and new output directory.\n",
         )
 
 

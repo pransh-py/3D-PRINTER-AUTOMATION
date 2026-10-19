@@ -8,6 +8,15 @@ export function AppearanceSwitch() {
       : window.matchMedia("(prefers-color-scheme: dark)").matches;
     root.dataset.theme = dark ? "light" : "dark";
   }
-  return <button className="appearance-switch" type="button" onClick={toggle}
-    aria-label="Toggle light and dark appearance">Appearance</button>;
+  return (
+    <button
+      className="appearance-switch"
+      data-ui
+      type="button"
+      onClick={toggle}
+      aria-label="Toggle light and dark appearance"
+    >
+      Appearance
+    </button>
+  );
 }
