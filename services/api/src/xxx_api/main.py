@@ -5,7 +5,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from redis.asyncio import Redis
+from starlette.requests import Request
 
 from xxx_api import __version__
 from xxx_api.config import Settings, get_settings
@@ -14,10 +16,18 @@ from xxx_api.email import SmtpEmailSender
 from xxx_api.http import AuthResponseSecurityMiddleware, RequestContextMiddleware
 from xxx_api.logging import configure_logging
 from xxx_api.rate_limit import RedisRateLimiter
+from xxx_api.razorpay import GatewayUnavailableError, HttpRazorpayGateway
 from xxx_api.routes.auth import router as auth_router
+from xxx_api.routes.bridge import router as bridge_router
+from xxx_api.routes.catalogue import router as catalogue_router
+from xxx_api.routes.commerce import router as commerce_router
 from xxx_api.routes.health import router as health_router
+from xxx_api.routes.notifications import router as notifications_router
+from xxx_api.routes.payments import router as payments_router
+from xxx_api.routes.pricing import router as pricing_router
 from xxx_api.routes.quotes import router as quotes_router
-from xxx_api.storage import S3ObjectStorage
+from xxx_api.services.commerce import WorkflowConflictError, WorkflowNotFoundError
+from xxx_api.storage import create_object_storage
 
 
 @asynccontextmanager
@@ -54,7 +64,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.redis = redis_client
     app.state.rate_limiter = RedisRateLimiter(redis_client, runtime_settings)
     app.state.email_sender = SmtpEmailSender(runtime_settings)
-    app.state.object_storage = S3ObjectStorage(runtime_settings)
+    app.state.object_storage = create_object_storage(runtime_settings)
+    app.state.payment_gateway = HttpRazorpayGateway(runtime_settings)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(AuthResponseSecurityMiddleware)
     app.add_middleware(
@@ -66,6 +77,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.include_router(auth_router, prefix=runtime_settings.api_prefix)
     app.include_router(quotes_router, prefix=runtime_settings.api_prefix)
+    app.include_router(catalogue_router, prefix=runtime_settings.api_prefix)
+    app.include_router(pricing_router, prefix=runtime_settings.api_prefix)
+    app.include_router(commerce_router, prefix=runtime_settings.api_prefix)
+    app.include_router(bridge_router, prefix=runtime_settings.api_prefix)
+    app.include_router(payments_router, prefix=runtime_settings.api_prefix)
+    app.include_router(notifications_router, prefix=runtime_settings.api_prefix)
+
+    @app.exception_handler(GatewayUnavailableError)
+    async def gateway_unavailable(
+        _request: Request, error: GatewayUnavailableError
+    ) -> JSONResponse:
+        return JSONResponse(
+            {"detail": str(error)}, status_code=503, headers={"Cache-Control": "no-store"}
+        )
+
+    @app.exception_handler(WorkflowConflictError)
+    async def workflow_conflict(_request: Request, error: WorkflowConflictError) -> JSONResponse:
+        return JSONResponse(
+            {"detail": str(error)}, status_code=409, headers={"Cache-Control": "no-store"}
+        )
+
+    @app.exception_handler(WorkflowNotFoundError)
+    async def workflow_not_found(_request: Request, _error: WorkflowNotFoundError) -> JSONResponse:
+        return JSONResponse(
+            {"detail": "Record not found"}, status_code=404, headers={"Cache-Control": "no-store"}
+        )
+
     app.include_router(health_router)
     return app
 

@@ -22,8 +22,10 @@ from xxx_api.domain.quotes import (
 from xxx_api.domain.roles import Role
 from xxx_api.models.analysis import AnalysisRun, OutboxEvent
 from xxx_api.models.identity import User
+from xxx_api.models.pricing import QuoteEstimate
 from xxx_api.models.quotes import ModelAsset, QuoteRequest
 from xxx_api.services.audit import append_audit_event
+from xxx_api.services.notifications import request_notice
 from xxx_api.storage import ObjectNotFoundError, ObjectStorage, PresignedPost
 
 UPLOAD_CONTENT_TYPE = "application/octet-stream"
@@ -75,9 +77,7 @@ def _utc_now(now: datetime | None) -> datetime:
 
 def _safe_filename(value: str) -> tuple[str, ModelFormat]:
     leaf = value.replace("\\", "/").rsplit("/", maxsplit=1)[-1]
-    visible_characters = "".join(
-        character for character in leaf if category(character) != "Cc"
-    )
+    visible_characters = "".join(character for character in leaf if category(character) != "Cc")
     clean = normalize("NFC", visible_characters)
     clean = clean.strip()
     if not clean or clean in {".", ".."} or len(clean) > 255:
@@ -105,6 +105,7 @@ async def _visible_request(
         .options(
             selectinload(QuoteRequest.assets),
             selectinload(QuoteRequest.analysis_runs).selectinload(AnalysisRun.asset_results),
+            selectinload(QuoteRequest.estimates).selectinload(QuoteEstimate.policy),
         )
     )
     if lock:
@@ -121,12 +122,19 @@ async def create_quote_request(
     *,
     buyer: User,
     client_token: UUID,
+    quantity: int = 1,
+    fulfillment_mode: str = "pickup",
+    buyer_notes: str | None = None,
+    print_specification: dict[str, object] | None = None,
     now: datetime | None = None,
     audit_request_id: str | None = None,
 ) -> QuoteRequest:
     """Create or return one buyer-idempotent draft quote request."""
     if buyer.role is not Role.BUYER:
         raise QuoteRequestConflictError("only buyers create quote requests")
+    if not 1 <= quantity <= 100 or fulfillment_mode not in {"pickup", "local_delivery", "shipping"}:
+        raise QuoteRequestConflictError("invalid quantity or fulfilment mode")
+    notes = (buyer_notes or "").strip() or None
     existing = await session.scalar(
         select(QuoteRequest)
         .where(
@@ -136,9 +144,22 @@ async def create_quote_request(
         .options(
             selectinload(QuoteRequest.assets),
             selectinload(QuoteRequest.analysis_runs).selectinload(AnalysisRun.asset_results),
+            selectinload(QuoteRequest.estimates).selectinload(QuoteEstimate.policy),
         )
     )
     if existing is not None:
+        if (
+            existing.quantity,
+            existing.fulfillment_mode,
+            existing.buyer_notes,
+            existing.print_specification,
+        ) != (
+            quantity,
+            fulfillment_mode,
+            notes,
+            print_specification,
+        ):
+            raise QuoteRequestConflictError("the client token already identifies another request")
         return existing
     created_at = _utc_now(now)
     request = QuoteRequest(
@@ -147,10 +168,15 @@ async def create_quote_request(
         client_token=client_token,
         status=QuoteRequestStatus.DRAFT,
         version=1,
+        quantity=quantity,
+        fulfillment_mode=fulfillment_mode,
+        buyer_notes=notes,
+        print_specification=print_specification,
         created_at=created_at,
         updated_at=created_at,
         assets=[],
         analysis_runs=[],
+        estimates=[],
     )
     session.add(request)
     try:
@@ -175,13 +201,26 @@ async def create_quote_request(
             )
             .options(
                 selectinload(QuoteRequest.assets),
-                selectinload(QuoteRequest.analysis_runs).selectinload(
-                    AnalysisRun.asset_results
-                ),
+                selectinload(QuoteRequest.analysis_runs).selectinload(AnalysisRun.asset_results),
+                selectinload(QuoteRequest.estimates).selectinload(QuoteEstimate.policy),
             )
         )
         if repeated is None:
             raise
+        if (
+            repeated.quantity,
+            repeated.fulfillment_mode,
+            repeated.buyer_notes,
+            repeated.print_specification,
+        ) != (
+            quantity,
+            fulfillment_mode,
+            notes,
+            print_specification,
+        ):
+            raise QuoteRequestConflictError(
+                "the client token already identifies another request"
+            ) from None
         return repeated
     return request
 
@@ -202,9 +241,8 @@ async def list_quote_requests(
             .where(*filters)
             .options(
                 selectinload(QuoteRequest.assets),
-                selectinload(QuoteRequest.analysis_runs).selectinload(
-                    AnalysisRun.asset_results
-                ),
+                selectinload(QuoteRequest.analysis_runs).selectinload(AnalysisRun.asset_results),
+                selectinload(QuoteRequest.estimates).selectinload(QuoteEstimate.policy),
             )
             .order_by(QuoteRequest.created_at.desc(), QuoteRequest.id)
             .limit(limit)
@@ -507,6 +545,7 @@ async def submit_quote_request(
             "request_version": request.version,
         },
     )
+    await request_notice(session, "owner.request_submitted", "quote_request", request.id)
     await session.commit()
     await session.refresh(request, attribute_names=["updated_at"])
     return request

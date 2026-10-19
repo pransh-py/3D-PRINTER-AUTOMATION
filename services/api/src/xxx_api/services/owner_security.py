@@ -218,9 +218,7 @@ async def start_owner_mfa_enrollment(
     )
     method.enabled_at = None
     method.last_used_counter = None
-    await session.execute(
-        delete(MfaRecoveryCode).where(MfaRecoveryCode.mfa_method_id == method.id)
-    )
+    await session.execute(delete(MfaRecoveryCode).where(MfaRecoveryCode.mfa_method_id == method.id))
     append_audit_event(
         session,
         AuditEventType.OWNER_MFA_ENROLLMENT_STARTED,

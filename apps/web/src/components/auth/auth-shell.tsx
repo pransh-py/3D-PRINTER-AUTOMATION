@@ -24,8 +24,8 @@ export function AuthShell({
 }: AuthShellProps) {
   return (
     <main className={styles.shell}>
-      <Link className={styles.wordmark} href="/" aria-label="xxx home">
-        xxx<span>.</span>
+      <Link className={styles.wordmark} href="/" aria-label="PrintFlow 3D home">
+        PrintFlow <span>3D</span>
       </Link>
       <section className={styles.card}>
         <p className={styles.kicker}>{kicker}</p>

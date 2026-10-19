@@ -17,3 +17,7 @@ coverage/
 dist/
 build/
 *.tsbuildinfo
+.local/
+services/bridge/.state/
+.next-verification/
+.next-print-station/

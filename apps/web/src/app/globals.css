@@ -1,12 +1,74 @@
 @import "tailwindcss";
 
 :root {
-  --ink: #13120f;
-  --paper: #f2eee5;
-  --orange: #f25b2a;
+  --ink: #192b30;
+  --paper: #f5f7f8;
+  --surface: #ffffff;
+  --soft: #eaf0f2;
+  --orange: #b44625;
+  --link: #b44625;
   --acid: #d7ff48;
-  --line: rgba(19, 18, 15, 0.18);
-  --muted: #666158;
+  --line: #cbd6d8;
+  --muted: #526369;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e3ecee;
+    --paper: #142125;
+    --surface: #1c2d32;
+    --soft: #263b42;
+    --line: #40565d;
+    --muted: #b7c9cf;
+    --orange: #c44f2b;
+    --link: #f2a38b;
+  }
+}
+
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/geist.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+:root[data-theme="light"] {
+  --ink: #192b30;
+  --paper: #f5f7f8;
+  --surface: #ffffff;
+  --soft: #eaf0f2;
+  --line: #cbd6d8;
+  --muted: #526369;
+  --orange: #b44625;
+  --link: #b44625;
+}
+:root[data-theme="dark"] {
+  --ink: #e3ecee;
+  --paper: #142125;
+  --surface: #1c2d32;
+  --soft: #263b42;
+  --line: #40565d;
+  --muted: #b7c9cf;
+  --orange: #c44f2b;
+  --link: #f2a38b;
+}
+.appearance-switch {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 4;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 9px 13px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.appearance-switch:focus-visible {
+  outline: 3px solid var(--orange);
+  outline-offset: 3px;
 }
 
 * {
@@ -21,7 +83,7 @@ body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Geist", Arial, Helvetica, sans-serif;
 }
 
 a {
@@ -40,8 +102,17 @@ a:focus-visible {
   position: relative;
   border-bottom: 1px solid var(--line);
   background:
-    linear-gradient(90deg, transparent 49.9%, rgba(19, 18, 15, 0.06) 50%, transparent 50.1%),
-    radial-gradient(circle at 77% 42%, rgba(242, 91, 42, 0.14), transparent 28%),
+    linear-gradient(
+      90deg,
+      transparent 49.9%,
+      rgba(19, 18, 15, 0.06) 50%,
+      transparent 50.1%
+    ),
+    radial-gradient(
+      circle at 77% 42%,
+      rgba(242, 91, 42, 0.14),
+      transparent 28%
+    ),
     var(--paper);
 }
 
@@ -100,14 +171,16 @@ a:focus-visible {
   gap: 28px;
   border: 1px solid var(--ink);
   background: var(--ink);
-  color: white;
+  color: var(--paper);
   padding: 0 26px;
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   box-shadow: 5px 5px 0 var(--orange);
-  transition: transform 160ms ease, box-shadow 160ms ease;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .button:hover {
@@ -328,7 +401,9 @@ a:focus-visible {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  transition: background 180ms ease, color 180ms ease;
+  transition:
+    background 180ms ease,
+    color 180ms ease;
 }
 
 .capability-grid article:hover {
@@ -425,25 +500,31 @@ footer p:last-child {
   min-height: 100vh;
   padding: 36px max(24px, calc((100vw - 1100px) / 2));
   background:
-    linear-gradient(90deg, transparent 49.9%, rgba(19, 18, 15, 0.06) 50%, transparent 50.1%),
+    linear-gradient(
+      90deg,
+      transparent 49.9%,
+      rgba(19, 18, 15, 0.06) 50%,
+      transparent 50.1%
+    ),
     var(--paper);
 }
 
 .form-card {
   width: min(720px, 100%);
-  margin: 15vh auto 0;
-  padding: clamp(32px, 7vw, 76px);
-  border: 1px solid var(--ink);
-  background: rgba(242, 238, 229, 0.92);
-  box-shadow: 12px 12px 0 var(--orange);
+  margin: 48px auto 0;
+  padding: clamp(24px, 5vw, 52px);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: none;
 }
 
 .form-card h1 {
   margin: 18px 0;
-  font-size: clamp(2.8rem, 7vw, 5.5rem);
-  line-height: 0.92;
-  letter-spacing: -0.065em;
-  text-transform: uppercase;
+  font-size: clamp(2.2rem, 5vw, 3.2rem);
+  line-height: 1.1;
+  letter-spacing: -0.045em;
+  text-transform: none;
 }
 
 .form-card > p:not(.section-kicker) {

@@ -12,14 +12,23 @@ class HealthyRedis:
     async def ping(self) -> bool:
         return True
 
+    async def aclose(self) -> None:
+        pass
+
 
 class UnhealthyRedis:
     async def ping(self) -> bool:
         raise RedisError
 
+    async def aclose(self) -> None:
+        pass
+
 
 class HealthyStorage:
     async def check_ready(self) -> None:
+        pass
+
+    def close(self) -> None:
         pass
 
 
@@ -27,11 +36,15 @@ class UnhealthyStorage:
     async def check_ready(self) -> None:
         raise ObjectStorageError
 
+    def close(self) -> None:
+        pass
+
 
 def test_liveness_has_stable_contract_and_request_id() -> None:
-    client = TestClient(create_app(Settings(environment="test")))
-
-    response = client.get("/health/live", headers={"X-Request-ID": "test-request-1"})
+    with TestClient(
+        create_app(Settings(environment="test", database_url="sqlite+aiosqlite:///:memory:"))
+    ) as client:
+        response = client.get("/health/live", headers={"X-Request-ID": "test-request-1"})
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
@@ -39,22 +52,20 @@ def test_liveness_has_stable_contract_and_request_id() -> None:
 
 
 def test_readiness_fails_when_redis_is_unavailable() -> None:
-    app = create_app(
-        Settings(environment="test", database_url="sqlite+aiosqlite:///:memory:")
-    )
+    app = create_app(Settings(environment="test", database_url="sqlite+aiosqlite:///:memory:"))
     app.state.redis = UnhealthyRedis()
-    client = TestClient(app)
-
-    response = client.get("/health/ready")
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Service not ready"}
 
 
 def test_unsafe_request_id_is_replaced() -> None:
-    client = TestClient(create_app(Settings(environment="test")))
-
-    response = client.get("/health/live", headers={"X-Request-ID": "unsafe request id"})
+    with TestClient(
+        create_app(Settings(environment="test", database_url="sqlite+aiosqlite:///:memory:"))
+    ) as client:
+        response = client.get("/health/live", headers={"X-Request-ID": "unsafe request id"})
 
     assert response.status_code == 200
     assert response.headers["X-Request-ID"] != "unsafe request id"
@@ -62,28 +73,24 @@ def test_unsafe_request_id_is_replaced() -> None:
 
 
 def test_readiness_checks_configured_dependencies() -> None:
-    app = create_app(
-        Settings(environment="test", database_url="sqlite+aiosqlite:///:memory:")
-    )
+    app = create_app(Settings(environment="test", database_url="sqlite+aiosqlite:///:memory:"))
     app.state.redis = HealthyRedis()
+    app.state.object_storage.close()
     app.state.object_storage = HealthyStorage()
-    client = TestClient(app)
-
-    response = client.get("/health/ready")
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
 def test_readiness_fails_when_private_storage_is_unavailable() -> None:
-    app = create_app(
-        Settings(environment="test", database_url="sqlite+aiosqlite:///:memory:")
-    )
+    app = create_app(Settings(environment="test", database_url="sqlite+aiosqlite:///:memory:"))
     app.state.redis = HealthyRedis()
+    app.state.object_storage.close()
     app.state.object_storage = UnhealthyStorage()
-    client = TestClient(app)
-
-    response = client.get("/health/ready")
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Service not ready"}
@@ -114,4 +121,5 @@ def test_production_disables_interactive_docs() -> None:
         )
     )
 
-    assert client.get("/docs").status_code == 404
+    with client:
+        assert client.get("/docs").status_code == 404

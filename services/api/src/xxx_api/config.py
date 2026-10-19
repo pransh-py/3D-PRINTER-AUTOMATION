@@ -1,6 +1,7 @@
 """Validated application configuration."""
 
 from functools import lru_cache
+from os import environ
 from pathlib import Path
 from typing import Literal, cast
 
@@ -63,7 +64,17 @@ class Settings(BaseSettings):
     analysis_validator_timeout_seconds: int = Field(default=60, ge=5, le=300)
     analysis_sandbox_mode: AnalysisSandboxMode = "process"
     analysis_bubblewrap_command: str = "bwrap"
+    analysis_slicer_command: Path | None = None
+    analysis_slicer_version: str | None = Field(default=None, min_length=1, max_length=64)
+    analysis_slicer_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    analysis_profile_directory: Path | None = None
+    analysis_preset_manifest: Path | None = None
+    analysis_profile_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    analysis_material_code: str | None = Field(default=None, pattern=r"^[a-z0-9-]{1,32}$")
+    analysis_slicer_timeout_seconds: int = Field(default=240, ge=10, le=600)
     storage_endpoint_url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:9000")
+    storage_backend: Literal["s3", "local"] = "s3"
+    storage_local_directory: Path | None = None
     storage_region: str = Field(default="us-east-1", min_length=1, max_length=64)
     storage_bucket: str = Field(
         default="xxx-private-models",
@@ -84,13 +95,92 @@ class Settings(BaseSettings):
     smtp_starttls: bool = False
     smtp_use_tls: bool = False
     smtp_timeout_seconds: float = Field(default=10.0, gt=0, le=30)
+    workflow_notifications_enabled: bool = False
+    notification_max_attempts: int = Field(default=5, ge=1, le=10)
     email_verification_ttl_hours: int = Field(default=24, ge=1, le=72)
     password_reset_ttl_minutes: int = Field(default=30, ge=10, le=60)
     secure_cookies: bool = False
+    razorpay_enabled: bool = False
+    razorpay_mode: Literal["test", "live"] = "test"
+    razorpay_checkout_name: str | None = Field(default=None, min_length=1, max_length=120)
+    razorpay_key_id: str | None = Field(default=None, pattern=r"^rzp_(test|live)_[A-Za-z0-9]+$")
+    razorpay_key_secret: SecretStr | None = None
+    razorpay_webhook_secret: SecretStr | None = None
+    razorpay_timeout_seconds: float = Field(default=10, gt=0, le=20)
 
     @model_validator(mode="after")
     def validate_production_safety(self) -> "Settings":
         """Refuse configuration that would weaken production boundaries."""
+        if self.storage_backend == "local":
+            if self.environment not in {"development", "test"}:
+                raise ValueError("local model storage is only for development/test")
+            if not self.storage_local_directory or not self.storage_local_directory.is_absolute():
+                raise ValueError("local model storage requires an absolute private directory")
+            loopback = {"127.0.0.1", "localhost", "::1"}
+            if self.public_web_url.host not in loopback or any(
+                AnyHttpUrl(origin).host not in loopback for origin in self.allowed_origins
+            ):
+                raise ValueError("local model storage requires loopback-only web origins")
+            directory = self.storage_local_directory.resolve()
+            if directory in {Path("/"), Path.home(), Path.cwd()} or "public" in directory.parts:
+                raise ValueError("local model storage requires a dedicated non-public directory")
+        if self.razorpay_enabled:
+            if (
+                not self.razorpay_key_id
+                or not self.razorpay_key_secret
+                or not self.razorpay_webhook_secret
+                or not self.razorpay_checkout_name
+            ):
+                raise ValueError("Razorpay requires key ID, secrets and an approved Checkout name")
+            if not self.razorpay_checkout_name.strip() or any(
+                ord(char) < 32 for char in self.razorpay_checkout_name
+            ):
+                raise ValueError("Razorpay Checkout name cannot be blank or contain controls")
+            if not self.razorpay_key_id.startswith(f"rzp_{self.razorpay_mode}_"):
+                raise ValueError("Razorpay key ID does not match the configured mode")
+            if any(
+                len(secret.get_secret_value().encode()) < 16
+                for secret in (self.razorpay_key_secret, self.razorpay_webhook_secret)
+            ):
+                raise ValueError("Razorpay secrets must be at least 16 bytes")
+            if self.razorpay_key_secret == self.razorpay_webhook_secret:
+                raise ValueError("Razorpay API and webhook secrets must be distinct")
+            if self.environment == "production" and self.razorpay_mode != "live":
+                raise ValueError("Test payments cannot be enabled in production")
+            if self.environment in {"development", "test"} and self.razorpay_mode == "live":
+                raise ValueError("Live payments cannot be enabled in local or test environments")
+        slicer_fields = (
+            self.analysis_slicer_command,
+            self.analysis_slicer_version,
+            self.analysis_slicer_sha256,
+        )
+        profile_fields = (
+            self.analysis_profile_directory,
+            self.analysis_profile_sha256,
+            self.analysis_material_code,
+        )
+        if any(value is not None for value in (*slicer_fields, *profile_fields)):
+            if any(value is None for value in slicer_fields) or (
+                self.analysis_preset_manifest is None
+                and any(value is None for value in profile_fields)
+            ):
+                raise ValueError(
+                    "slicing requires executable, version, profiles, hash and material"
+                )
+            if not self.analysis_slicer_command or not self.analysis_slicer_command.is_absolute():
+                raise ValueError("slicer executable must be an absolute reviewed path")
+            if self.analysis_preset_manifest is None and (
+                not self.analysis_profile_directory
+                or not self.analysis_profile_directory.is_absolute()
+            ):
+                raise ValueError("profile directory must be an absolute reviewed path")
+            if self.analysis_preset_manifest and not self.analysis_preset_manifest.is_absolute():
+                raise ValueError("preset manifest must be an absolute reviewed path")
+            if (
+                self.analysis_lease_seconds
+                < self.max_models_per_quote * self.analysis_slicer_timeout_seconds + 120
+            ):
+                raise ValueError("analysis lease must cover all slicing timeouts plus validation")
         if self.environment == "production":
             jwt_secret = self.jwt_signing_secret.get_secret_value()
             token_secret = self.token_hash_secret.get_secret_value()
@@ -148,4 +238,12 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Return one validated settings object per process."""
-    return Settings()
+    return load_settings()
+
+
+def load_settings() -> Settings:
+    """The dedicated local launcher supplies a complete environment, not a repo .env."""
+    # pydantic-settings accepts this runtime option; its generated mypy signature omits it.
+    return Settings(  # type: ignore[call-arg]
+        _env_file=None if environ.get("PRINTFLOW_IGNORE_DOTENV") == "1" else ".env"
+    )

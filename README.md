@@ -1,10 +1,42 @@
-# xxx
+# PrintFlow — local 3D print station
 
-Public 3D-printing ordering and operations platform for a Chennai business using a FlashForge AD5X.
+Current priority: **upload → configure → slice → automatically start one AD5X print**.
+No account, cart, payment, Docker, PostgreSQL or Redis is needed for this local path.
+The existing business site is preserved separately; it is not the printer-control UI.
+
+On this configured Mac, start:
+
+```sh
+.venv313/bin/python tools/run_print_station.py run
+```
+
+Open [the print station](http://127.0.0.1:3102/print). This defaults to **slicing only**.
+STL/OBJ, real previews, mm/inches, X/Y rotation, 0.1/0.15/0.2 mm layers, PLA/PETG colours,
+infill, supports and 1–10 copies on one plate are supported. Time and grams come from Orca.
+The local configuration, models, journal and artifacts live privately in `.local/print-station`.
+
+Physical starts require the printer's actual connection, reviewed profiles, build plate,
+spool mapping and a per-job bed-clear/supervision confirmation. The friend's AD5X has ZMOD;
+Moonraker/G-code is the prepared primary integration. **Actual printer operation is not yet
+verified.** The station runs on Mac/Linux; it can talk directly to the printer on the same LAN,
+so the Windows computer does not need a new service. See [the visit steps](docs/VISIT_PREFLIGHT.md).
+
+For a fresh setup, `tools/run_print_station.py --help` lists configuration commands. Prepare
+standalone profiles using `tools/prepare_print_preset.py`; initialize with `init --slicer
+/absolute/OrcaSlicer --version VERSION --pla-manifest /absolute/presets.json`, then explicitly
+select the actual build plate with `plate --type`. Do not enable physical printing from demo profiles.
+
+## Preserved business workflow (not required for local printing)
+
+The earlier public ordering and operations platform is retained for future business work.
 
 The repository is under active MVP development. Product and safety contracts live in
 [`docs/`](docs/), the public web application lives in [`apps/web`](apps/web), and the API lives
 in [`services/api`](services/api).
+
+For the implemented local quotation-to-fulfilment workflow, isolated browser lab and remaining
+launch gates, see [`docs/LOCAL_WORKFLOW.md`](docs/LOCAL_WORKFLOW.md). Razorpay and automatic
+AD5X business-queue dispatch are disabled; lab prices and payment evidence are fictional.
 
 ## Prerequisites
 
@@ -21,15 +53,51 @@ python3.13 -m venv .venv313
 .venv313/bin/pip install -e 'services/api[dev]' -e 'services/worker[dev]'
 ```
 
-## Run locally
+## Today's private local setup
 
-Start the pinned development dependencies:
+This starts the real API, Redis worker, PostgreSQL, local SMTP and frontend, not the seeded
+browser fixture. It uses dedicated Docker volumes and private files under ignored `.local/service`.
+Existing databases and volumes are not replaced. Run from the repository root:
 
 ```sh
-docker compose up -d
+.venv313/bin/python tools/local_service.py init
+.venv313/bin/python tools/local_service.py migrate
+.venv313/bin/python tools/local_service.py owner --email YOUR_EMAIL --name "Business Owner"
+.venv313/bin/python tools/local_service.py run all
 ```
 
-This starts PostgreSQL, Redis, private MinIO storage, and Mailpit. MinIO serves its S3 API
+The owner command requests a password interactively. Complete normal sign-in and MFA setup.
+Open **http://127.0.0.1:3100**; local verification/reset emails appear at
+**http://127.0.0.1:58025**. API readiness is on port 8011. Stop the launcher with Ctrl+C;
+its own processes stop, while your database/files remain. `tools/local_service.py check` reports
+configuration without exposing secrets. Never publish the private configuration or access files.
+
+The form offers only priced, pinned slicer presets. Configure your actual reviewed profiles
+and activate your approved rate card before taking orders; a new installation deliberately has
+no invented catalogue or selling prices. See [the visit checklist](docs/VISIT_PREFLIGHT.md).
+STL/OBJ models have an interactive browser preview; measured slicing drives automatic estimates.
+The owner still issues the final quotation. Razorpay code is ready for test credentials but is
+disabled until configured. AD5X handoff is manual and supervised, not automatic printer control.
+
+This filesystem backend is intentionally single-machine/loopback-only, never staging or production.
+
+## S3-based development alternative
+
+Start the available pinned development dependencies:
+
+```sh
+docker compose up -d postgres redis mailpit
+```
+
+This starts PostgreSQL, Redis and Mailpit. **The older S3 setup remains blocked:**
+the pinned MinIO image no longer pulls from Docker Hub; the same official Quay tag returns
+401. The [community repository](https://github.com/minio/minio) is archived and unmaintained.
+An owner-approved, trusted local image or maintained S3-compatible replacement is required.
+Do not silently use an unofficial mirror, accept a new licence, or replace existing storage
+data. The S3 adapter remains unchanged; real S3 integration is not verified. The explicitly
+approved private local-folder adapter above is the available single-machine alternative.
+
+When an approved storage service is available, the existing configuration expects its S3 API
 at `http://127.0.0.1:9000` and its console at `http://127.0.0.1:9001`; Mailpit is at
 `http://127.0.0.1:8025`. The initialization container creates a non-public, versioned
 `xxx-private-models` bucket with development-only browser CORS. Never reuse the committed
@@ -94,6 +162,35 @@ session before re-enrollment:
 Production also requires a distinct random `XXX_MFA_ENCRYPTION_SECRET` of at least 32 bytes.
 It must not equal the JWT signing or token-hash secret.
 
+## Pricing configuration
+
+The owner account page can create immutable draft INR rate cards and activate one version after
+recent MFA. The repository does not seed prices, material rates, contingency, tax, or minimum
+charges. Do not activate a production rate card until the owner has supplied and approved those
+values. Estimate creation also remains blocked until a successful AD5X-profile-backed slice has
+produced integer filament and duration metrics.
+
+Money is stored and calculated in integer paise; browser forms accept rupees only as an input
+convenience. See `docs/adr/0006-versioned-pricing-and-estimates.md` for the exact formula and
+snapshot contract.
+
+## Payment plan
+
+Razorpay Standard Checkout is the approved primary path. Its disabled-by-default adapter creates
+provider orders from accepted-quote amounts, validates signed callbacks/webhooks, reconciles the
+captured payment, and creates the print-queue effect exactly once. Browser success state and
+`payment.authorized` are not paid-order authority.
+
+Manual UPI is a planned, unimplemented owner-issued fallback. Real verification/activation is
+blocked until the owner supplies an onboarded Razorpay merchant account, approved test/live
+credentials and webhook settings, capture/settlement ownership, and refund/cancellation policy.
+See [`docs/adr/0007-razorpay-primary-payments.md`](docs/adr/0007-razorpay-primary-payments.md).
+
+Workflow email has private delivery records, fenced retries and an owner Notifications view;
+it is disabled by default. Setup, local proof, remaining software and release gates are in
+[`docs/LOCAL_WORKFLOW.md`](docs/LOCAL_WORKFLOW.md). Fictional payments, comment-only G-code and
+loopback SMTP acceptance are not production acceptance.
+
 ## Verify
 
 ```sh
@@ -109,7 +206,9 @@ npm --prefix apps/web run build
 ## Development services
 
 Authentication requires Redis for distributed rate limits and Mailpit for local
-verification/reset email. Private model intake requires MinIO. The root `compose.yaml` is the
+verification/reset email. Private model intake requires an approved private S3-compatible service.
+The MinIO image in the current Compose definition is unavailable; see the storage gate above.
+The root `compose.yaml` is the
 single local-development definition and binds service ports to loopback only. Its credentials
 must never be reused in production.
 

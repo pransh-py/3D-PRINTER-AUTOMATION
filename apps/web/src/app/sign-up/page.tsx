@@ -11,7 +11,7 @@ export default function SignUpPage() {
   return (
     <AuthShell
       kicker="CREATE AN ACCOUNT"
-      title="Join xxx."
+      title="Create your account"
       description="Buyer accounts get private model storage, reviewed quotes, UPI payment tracking, and order updates from queue to delivery."
       footerLinks={[
         { label: "Already have an account? Sign in", href: "/sign-in" },

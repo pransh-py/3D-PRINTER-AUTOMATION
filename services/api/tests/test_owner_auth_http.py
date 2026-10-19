@@ -121,12 +121,39 @@ def test_owner_mfa_http_flow_requires_role_csrf_and_second_factor() -> None:
         buyer_login = _login(client, "buyer@example.com", BUYER_PASSWORD)
         assert buyer_login.status_code == 200
         assert client.get("/api/v1/auth/mfa").status_code == 403
+        assert client.get("/api/v1/owner/pricing-policies").status_code == 403
         client.cookies.clear()
 
         owner_login = _login(client, "owner@example.com", OWNER_PASSWORD)
         assert owner_login.status_code == 200
         assert client.get("/api/v1/auth/mfa").json() == {"enabled": False}
         assert client.get("/api/v1/test/recent-owner").status_code == 403
+        assert client.get("/api/v1/owner/pricing-policies").status_code == 200
+
+        csrf = client.cookies.get("xxx_csrf")
+        assert csrf is not None
+        draft = client.post(
+            "/api/v1/owner/pricing-policies",
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+            json={
+                "machineRatePaisePerHour": 10_000,
+                "setupFeePaise": 1_000,
+                "minimumOrderPaise": 10_000,
+                "contingencyBps": 1_000,
+                "taxBps": 0,
+                "estimateValidityHours": 48,
+                "materials": [
+                    {"code": "pla", "displayName": "PLA", "ratePaisePerGram": 200}
+                ],
+            },
+        )
+        assert draft.status_code == 201
+        policy_id = draft.json()["id"]
+        before_mfa = client.post(
+            f"/api/v1/owner/pricing-policies/{policy_id}/activate",
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+        )
+        assert before_mfa.status_code == 403
 
         missing_csrf = client.post(
             "/api/v1/auth/mfa/totp/enroll",
@@ -160,6 +187,12 @@ def test_owner_mfa_http_flow_requires_role_csrf_and_second_factor() -> None:
         assert len(recovery_codes) == 10
         assert client.get("/api/v1/auth/mfa").json() == {"enabled": True}
         assert client.get("/api/v1/test/recent-owner").json() == {"allowed": True}
+        activated = client.post(
+            f"/api/v1/owner/pricing-policies/{policy_id}/activate",
+            headers={"Origin": ORIGIN, "X-CSRF-Token": csrf},
+        )
+        assert activated.status_code == 200
+        assert activated.json()["status"] == "active"
 
         async def expire_recent_mfa() -> None:
             async with sessions() as session:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from hashlib import file_digest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import cast
@@ -14,9 +15,11 @@ from xxx_api.config import Settings
 from xxx_api.domain.quotes import ModelAssetStatus, ModelFormat
 from xxx_api.models.analysis import OutboxEvent
 from xxx_api.models.quotes import ModelAsset
+from xxx_api.print_presets import PresetConfigurationError, load_print_presets
 from xxx_api.services.analysis import (
     AnalysisLeaseUnavailableError,
     AnalysisStateError,
+    SlicedAssetEvidence,
     ValidatedAssetEvidence,
     claim_analysis_run,
     complete_validation_awaiting_profile,
@@ -29,6 +32,7 @@ from xxx_api.storage import ObjectStorage, ObjectStorageError
 
 from xxx_worker.queue import AnalysisQueue, AnalysisQueueMessage
 from xxx_worker.sandbox import SandboxValidator
+from xxx_worker.slicing import OrcaSlicer
 from xxx_worker.validation import ModelFormat as WorkerModelFormat
 from xxx_worker.validation import ModelValidationError
 
@@ -68,13 +72,52 @@ class AnalysisOrchestrator:
             return DeliveryDisposition.ACKNOWLEDGE
 
         try:
-            evidence = await self._validate_assets(run.quote_request.assets)
+            selected_settings = self.settings
+            specification = run.quote_request.print_specification
+            if specification:
+                try:
+                    preset = next(
+                        (
+                            item
+                            for item in load_print_presets(self.settings)
+                            if item.code == specification.get("presetCode")
+                        ),
+                        None,
+                    )
+                    colour = specification.get("colour")
+                    if colour is not None and not isinstance(colour, str):
+                        raise PresetConfigurationError("Invalid captured colour.")
+                    if preset is None or preset.specification(colour) != specification:
+                        raise PresetConfigurationError("The selected print offering changed.")
+                    selected_settings = self.settings.model_copy(
+                        update={
+                            "analysis_profile_directory": preset.profile_directory,
+                            "analysis_profile_sha256": preset.profile_sha256,
+                            "analysis_material_code": preset.material_code,
+                        }
+                    )
+                except PresetConfigurationError:
+                    raise _AssetValidationFailureError(
+                        run.quote_request.assets[0].id, "slicer_profile_changed"
+                    ) from None
+            elif self.settings.analysis_profile_directory is None:
+                selected_settings = self.settings.model_copy(
+                    update={"analysis_slicer_command": None}
+                )
+            evidence, slices = await self._validate_assets(
+                run.quote_request.assets,
+                slicing_settings=selected_settings,
+            )
             async with self.sessions() as session:
                 await complete_validation_awaiting_profile(
                     session,
                     run_id=run.id,
                     lease_token=lease_token,
                     evidence=evidence,
+                    slices=slices if selected_settings.analysis_slicer_command else None,
+                    slicer_version=self.settings.analysis_slicer_version,
+                    material_code=selected_settings.analysis_material_code,
+                    print_preset_code=str(specification["presetCode"]) if specification else None,
                 )
         except _AssetValidationFailureError as error:
             async with self.sessions() as session:
@@ -97,8 +140,12 @@ class AnalysisOrchestrator:
     async def _validate_assets(
         self,
         assets: list[ModelAsset],
-    ) -> list[ValidatedAssetEvidence]:
+        *,
+        slicing_settings: Settings | None = None,
+    ) -> tuple[list[ValidatedAssetEvidence], list[SlicedAssetEvidence]]:
         validated: list[ValidatedAssetEvidence] = []
+        sliced: list[SlicedAssetEvidence] = []
+        selected_settings = slicing_settings or self.settings
         with TemporaryDirectory(prefix="xxx-analysis-") as scratch_value:
             scratch = Path(scratch_value)
             for asset in assets:
@@ -132,8 +179,52 @@ class AnalysisOrchestrator:
                         warning_codes=result.warning_codes,
                     )
                 )
+                if selected_settings.analysis_slicer_command:
+                    if result.fits_build_volume is False:
+                        raise _AssetValidationFailureError(asset.id, "build_volume_exceeded")
+                    slice_directory = scratch / f"slice-{asset.id}"
+                    slice_directory.mkdir()
+                    # The source is copied into the only writable/visible sandbox directory.
+                    slice_source = slice_directory / f"source.{asset.declared_format.value}"
+                    source.rename(slice_source)
+                    try:
+                        output = await OrcaSlicer(selected_settings).slice(
+                            slice_source, slice_directory
+                        )
+                    except ModelValidationError as error:
+                        raise _AssetValidationFailureError(asset.id, error.code) from None
+                    artifact_key = (
+                        f"models/derived/{asset.quote_request_id}/{asset.id}/"
+                        f"{output.artifact_sha256}.gcode"
+                    )
+                    await self.storage.upload_from_path(
+                        artifact_key, output.artifact, content_type="application/octet-stream"
+                    )
+                    preview_key = None
+                    preview_hash = None
+                    if output.preview:
+                        with output.preview.open("rb") as preview_file:
+                            preview_hash = file_digest(preview_file, "sha256").hexdigest()
+                        preview_key = (
+                            f"models/derived/{asset.quote_request_id}/{asset.id}/{preview_hash}.png"
+                        )
+                        await self.storage.upload_from_path(
+                            preview_key, output.preview, content_type="image/png"
+                        )
+                    sliced.append(
+                        SlicedAssetEvidence(
+                            asset.id,
+                            output.filament_mg,
+                            output.duration_seconds,
+                            artifact_key,
+                            output.artifact_sha256,
+                            output.profile_sha256,
+                            preview_key,
+                            preview_hash,
+                        )
+                    )
                 source.unlink(missing_ok=True)
-        return validated
+        return validated, sliced
 
 
 class _AssetValidationFailureError(Exception):

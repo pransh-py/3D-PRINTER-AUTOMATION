@@ -11,8 +11,8 @@ export default function SignInPage() {
   return (
     <AuthShell
       kicker="YOUR ACCOUNT"
-      title="Sign in to xxx."
-      description="Buyer accounts will use verified email, protected sessions, and private access to models, quotes, payments, and order tracking."
+      title="Welcome back"
+      description="Sign in to review your quotations, manage private model files and follow your orders."
       footerLinks={[
         { label: "New here? Create an account", href: "/sign-up" },
       ]}

@@ -67,7 +67,7 @@ export function SignInForm() {
 
   if (challenge !== null) {
     return (
-      <form className={styles.form} onSubmit={handleMfaSubmit}>
+      <form key="mfa" className={styles.form} onSubmit={handleMfaSubmit}>
         <p className={styles.status}>
           Enter the six-digit code from the owner authenticator, or one unused recovery code.
         </p>
@@ -114,7 +114,7 @@ export function SignInForm() {
   }
 
   return (
-    <form className={styles.form} onSubmit={handlePasswordSubmit}>
+    <form key="password" className={styles.form} onSubmit={handlePasswordSubmit}>
       <div className={styles.field}>
         <label className={styles.label} htmlFor="email">
           Email

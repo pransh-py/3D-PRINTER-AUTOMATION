@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from re import fullmatch
 from uuid import UUID
 
 from sqlalchemy import select
@@ -21,8 +22,21 @@ from xxx_api.domain.quotes import (
 from xxx_api.models.analysis import AnalysisAssetResult, AnalysisRun, OutboxEvent
 from xxx_api.models.quotes import QuoteRequest
 from xxx_api.services.audit import append_audit_event
+from xxx_api.services.notifications import request_notice
 
 SAFE_FAILURE_CODES = {
+    "model_transform_unsupported",
+    "slicer_unavailable",
+    "slicer_profile_unavailable",
+    "slicer_profile_invalid",
+    "slicer_profile_changed",
+    "slicer_timeout",
+    "slicer_failed",
+    "slicer_output_invalid",
+    "slicer_metrics_missing",
+    "slicer_metrics_invalid",
+    "slicer_multiple_plates_unsupported",
+    "build_volume_exceeded",
     "analysis_attempt_limit",
     "archive_compression_ratio_exceeded",
     "archive_duplicate_entry",
@@ -96,6 +110,18 @@ class ValidatedAssetEvidence:
     warning_codes: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class SlicedAssetEvidence:
+    asset_id: UUID
+    filament_mg: int
+    duration_seconds: int
+    artifact_storage_key: str
+    artifact_sha256: str
+    profile_sha256: str
+    preview_storage_key: str | None = None
+    preview_sha256: str | None = None
+
+
 def _utc_now(now: datetime | None) -> datetime:
     value = now or datetime.now(UTC)
     if value.tzinfo is None:
@@ -136,9 +162,7 @@ async def claim_analysis_run(
     }:
         await session.rollback()
         return None
-    lease_expires_at = (
-        _utc_now(run.lease_expires_at) if run.lease_expires_at is not None else None
-    )
+    lease_expires_at = _utc_now(run.lease_expires_at) if run.lease_expires_at is not None else None
     if (
         run.status is AnalysisRunStatus.RUNNING
         and lease_expires_at is not None
@@ -193,9 +217,7 @@ async def claim_analysis_run(
 
 def _validate_evidence(run: AnalysisRun, evidence: list[ValidatedAssetEvidence]) -> None:
     active_assets = [
-        asset
-        for asset in run.quote_request.assets
-        if asset.status is ModelAssetStatus.VALIDATING
+        asset for asset in run.quote_request.assets if asset.status is ModelAssetStatus.VALIDATING
     ]
     expected_ids = {asset.id for asset in active_assets}
     received_ids = {item.asset_id for item in evidence}
@@ -220,19 +242,50 @@ async def complete_validation_awaiting_profile(
     run_id: UUID,
     lease_token: UUID,
     evidence: list[ValidatedAssetEvidence],
+    slices: list[SlicedAssetEvidence] | None = None,
+    slicer_version: str | None = None,
+    material_code: str | None = None,
+    print_preset_code: str | None = None,
     now: datetime | None = None,
 ) -> AnalysisRun:
     """Persist verified source evidence without inventing unavailable slicer metrics."""
     completed_at = _utc_now(now)
     run = await session.scalar(_run_query(run_id).with_for_update())
-    if (
-        run is None
-        or run.status is not AnalysisRunStatus.RUNNING
-        or run.lease_token != lease_token
-    ):
+    if run is None or run.status is not AnalysisRunStatus.RUNNING or run.lease_token != lease_token:
         await session.rollback()
         raise AnalysisStateError("analysis lease is stale")
     _validate_evidence(run, evidence)
+    sliced = {item.asset_id: item for item in slices or []}
+    if slices is not None:
+        specification = run.quote_request.print_specification
+        if specification and (
+            material_code != specification.get("materialCode")
+            or print_preset_code != specification.get("presetCode")
+            or any(item.profile_sha256 != specification.get("profileSha256") for item in slices)
+        ):
+            raise AnalysisStateError("slicing evidence does not match the selected print preset")
+        if (
+            len(sliced) != len(evidence)
+            or set(sliced) != {item.asset_id for item in evidence}
+            or not slicer_version
+            or not material_code
+            or len({item.profile_sha256 for item in slices}) != 1
+        ):
+            raise AnalysisStateError("slicing evidence is incomplete or inconsistent")
+        for sliced_item in slices:
+            if (
+                sliced_item.filament_mg <= 0
+                or sliced_item.duration_seconds <= 0
+                or fullmatch(r"[0-9a-f]{64}", sliced_item.artifact_sha256) is None
+                or fullmatch(r"[0-9a-f]{64}", sliced_item.profile_sha256) is None
+                or not sliced_item.artifact_storage_key
+                or (sliced_item.preview_storage_key is None) != (sliced_item.preview_sha256 is None)
+                or (
+                    sliced_item.preview_sha256 is not None
+                    and fullmatch(r"[0-9a-f]{64}", sliced_item.preview_sha256) is None
+                )
+            ):
+                raise AnalysisStateError("slicing evidence is invalid")
     by_id = {asset.id: asset for asset in run.quote_request.assets}
     for item in evidence:
         asset = by_id[item.asset_id]
@@ -242,7 +295,9 @@ async def complete_validation_awaiting_profile(
             AnalysisAssetResult(
                 analysis_run_id=run.id,
                 model_asset_id=asset.id,
-                status=AnalysisAssetStatus.AWAITING_PROFILE,
+                status=AnalysisAssetStatus.SLICED
+                if slices is not None
+                else AnalysisAssetStatus.AWAITING_PROFILE,
                 detected_format=item.detected_format,
                 verified_sha256=item.verified_sha256,
                 dimension_x_um=(item.dimensions_um[0] if item.dimensions_um else None),
@@ -252,12 +307,34 @@ async def complete_validation_awaiting_profile(
                 object_count=item.object_count,
                 fits_build_volume=item.fits_build_volume,
                 warning_codes=list(item.warning_codes),
+                filament_mg=sliced[item.asset_id].filament_mg if slices is not None else None,
+                duration_seconds=sliced[item.asset_id].duration_seconds
+                if slices is not None
+                else None,
+                artifact_storage_key=sliced[item.asset_id].artifact_storage_key
+                if slices is not None
+                else None,
+                artifact_sha256=sliced[item.asset_id].artifact_sha256
+                if slices is not None
+                else None,
+                preview_storage_key=sliced[item.asset_id].preview_storage_key
+                if slices is not None
+                else None,
+                preview_sha256=sliced[item.asset_id].preview_sha256 if slices is not None else None,
                 failure_code=None,
                 created_at=completed_at,
                 updated_at=completed_at,
             )
         )
-    run.status = AnalysisRunStatus.AWAITING_PROFILE
+    run.status = (
+        AnalysisRunStatus.SUCCEEDED if slices is not None else AnalysisRunStatus.AWAITING_PROFILE
+    )
+    if slices:
+        run.slicer_name = "OrcaSlicer"
+        run.slicer_version = slicer_version
+        run.material_code = material_code
+        run.print_preset_code = print_preset_code
+        run.profile_sha256 = slices[0].profile_sha256
     run.completed_at = completed_at
     run.lease_token = None
     run.lease_expires_at = None
@@ -265,7 +342,9 @@ async def complete_validation_awaiting_profile(
     run.quote_request.version += 1
     append_audit_event(
         session,
-        AuditEventType.ANALYSIS_RUN_AWAITING_PROFILE,
+        AuditEventType.ANALYSIS_RUN_SUCCEEDED
+        if slices is not None
+        else AuditEventType.ANALYSIS_RUN_AWAITING_PROFILE,
         occurred_at=completed_at,
         target_user_id=run.quote_request.buyer_id,
         details={
@@ -274,6 +353,7 @@ async def complete_validation_awaiting_profile(
             "model_count": len(evidence),
         },
     )
+    await request_notice(session, "owner.analysis_ready", "analysis_run", run.id)
     await session.commit()
     return run
 
@@ -311,13 +391,10 @@ async def _fail_locked_run(
             "quote_request_id": str(run.quote_request.id),
             "analysis_run_id": str(run.id),
             "failure_code": failure_code,
-            **(
-                {"model_asset_id": str(failed_asset_id)}
-                if failed_asset_id is not None
-                else {}
-            ),
+            **({"model_asset_id": str(failed_asset_id)} if failed_asset_id is not None else {}),
         },
     )
+    await request_notice(session, "owner.analysis_failed", "analysis_run", run.id)
 
 
 async def fail_analysis_run(
@@ -332,11 +409,7 @@ async def fail_analysis_run(
     """Finalize one leased run with an allowlisted buyer-safe failure code."""
     failed_at = _utc_now(now)
     run = await session.scalar(_run_query(run_id).with_for_update())
-    if (
-        run is None
-        or run.status is not AnalysisRunStatus.RUNNING
-        or run.lease_token != lease_token
-    ):
+    if run is None or run.status is not AnalysisRunStatus.RUNNING or run.lease_token != lease_token:
         await session.rollback()
         raise AnalysisStateError("analysis lease is stale")
     await _fail_locked_run(

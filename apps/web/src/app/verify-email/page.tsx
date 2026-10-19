@@ -12,7 +12,7 @@ export default function VerifyEmailPage() {
     <AuthShell
       kicker="CHECK YOUR INBOX"
       title="Verify your email."
-      description="If that email matches an xxx account, a verification link is on its way. Open it to activate your account and start requesting quotes."
+      description="If that email matches a PrintFlow 3D account, a verification link is on its way. Open it to activate your account and start requesting quotes."
       footerLinks={[
         { label: "Back to sign in", href: "/sign-in" },
         { label: "Need an account? Sign up", href: "/sign-up" },

@@ -94,10 +94,11 @@ export function AccountPanel() {
           <dd>{user.role === "owner" ? "Business owner" : "Buyer"}</dd>
         </div>
       </dl>
-      <p className={styles.help}>
-        Model uploads, quotes, and order tracking will appear here in the next product phase.
-      </p>
+      <p className={styles.help}>Protected account and business operations.</p>
       {user.role === "owner" && <OwnerMfaPanel />}
+      <Link href={user.role === "owner" ? "/operations" : "/orders"}>
+        {user.role === "owner" ? "Open operations workspace" : "View quotations & orders"}
+      </Link>
       {error && (
         <p className={styles.error} role="alert">
           {error}

@@ -109,6 +109,7 @@ test("copies the signed CSRF cookie into quote-request mutation headers", async 
         updatedAt: "2026-01-01T00:00:00Z",
         assets: [],
         latestAnalysis: null,
+        latestEstimate: null,
       },
       { status: 201 },
     );
@@ -171,6 +172,32 @@ function baseQuoteRequestPayload(latestAnalysis: unknown): unknown {
     updatedAt: "2026-01-01T00:00:00Z",
     assets: [],
     latestAnalysis,
+    latestEstimate: null,
+  };
+}
+
+function validEstimatePayload(): unknown {
+  return {
+    id: "00000000-0000-0000-0000-000000000030",
+    quoteRequestVersion: 2,
+    analysisRunId: "00000000-0000-0000-0000-000000000020",
+    pricingPolicyVersion: 1,
+    calculationVersion: "pricing-v1",
+    currency: "INR",
+    materialCode: "pla",
+    materialName: "PLA",
+    filamentMg: 12_500,
+    durationSeconds: 1_800,
+    materialPaise: 2_500,
+    machinePaise: 5_000,
+    setupPaise: 1_000,
+    contingencyPaise: 750,
+    minimumAdjustmentPaise: 750,
+    preTaxPaise: 10_000,
+    taxPaise: 1_800,
+    totalPaise: 11_800,
+    expiresAt: "2026-01-03T00:00:00Z",
+    createdAt: "2026-01-01T00:00:00Z",
   };
 }
 
@@ -201,6 +228,7 @@ function validAnalysisRunPayload(): unknown {
     slicerName: "OrcaSlicer",
     slicerVersion: "2.1.0",
     profileSha256: "b".repeat(64),
+    materialCode: "pla",
     queuedAt: "2026-01-01T00:00:00Z",
     startedAt: "2026-01-01T00:00:01Z",
     completedAt: "2026-01-01T00:00:05Z",
@@ -236,6 +264,31 @@ test("parses a quote request with a valid, non-null latest analysis", async () =
 test("parses a quote request with a null latest analysis", async () => {
   const list = await fetchQuoteRequestList(baseQuoteRequestPayload(null));
   assert.equal(list.items[0]!.latestAnalysis, null);
+});
+
+test("parses an immutable INR estimate breakdown", async () => {
+  const payload = {
+    ...(baseQuoteRequestPayload(validAnalysisRunPayload()) as Record<string, unknown>),
+    latestEstimate: validEstimatePayload(),
+  };
+  const list = await fetchQuoteRequestList(payload);
+  assert.equal(list.items[0]!.latestEstimate?.totalPaise, 11_800);
+  assert.equal(list.items[0]!.latestEstimate?.materialCode, "pla");
+});
+
+test("rejects an estimate with fractional paise", async () => {
+  const estimate = {
+    ...(validEstimatePayload() as Record<string, unknown>),
+    totalPaise: 11_800.5,
+  };
+  const payload = {
+    ...(baseQuoteRequestPayload(validAnalysisRunPayload()) as Record<string, unknown>),
+    latestEstimate: estimate,
+  };
+  await assert.rejects(
+    () => fetchQuoteRequestList(payload),
+    (error: unknown) => error instanceof QuoteApiError && error.status === 502,
+  );
 });
 
 test("rejects a latest analysis run with an invalid status", async () => {

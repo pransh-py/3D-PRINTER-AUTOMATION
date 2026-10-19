@@ -1,0 +1,251 @@
+.workspace {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 32px 80px;
+  color: var(--ink);
+}
+.workspaceNav { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding-bottom: 26px; margin-bottom: 34px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.workspaceNav .brand { font-size: 22px; font-weight: 750; letter-spacing: -.7px; color: var(--ink); }
+.brand span { color: var(--orange); }
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 30px;
+}
+.header h1 {
+  font-size: clamp(32px, 5vw, 46px);
+  margin: 8px 0 12px;
+  letter-spacing: -1.5px;
+}
+.header p {
+  max-width: 620px;
+  line-height: 1.6;
+}
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted);
+}
+.workspace a {
+  color: var(--link);
+  text-underline-offset: 4px;
+}
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 1px solid #cbd0d5;
+  padding-bottom: 14px;
+  margin-bottom: 20px;
+}
+.workspace button {
+  border: 1px solid #b2bac3;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 10px 15px;
+  font: inherit;
+  cursor: pointer;
+}
+.tabs button {
+  text-transform: capitalize;
+}
+.tabs button[aria-current="page"],
+.form button[type="submit"] {
+  background: var(--orange);
+  border-color: var(--orange);
+  color: white;
+}
+.workspace button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+.workspace :is(a, button, input, textarea):focus-visible {
+  outline: 3px solid #2674bd;
+  outline-offset: 3px;
+}
+.boundary {
+  background: var(--soft);
+  padding: 14px 18px;
+  border-left: 3px solid #7f8da0;
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 26px;
+}
+.error,
+.notice {
+  padding: 14px 18px;
+  border-left: 3px solid;
+  line-height: 1.5;
+}
+.error {
+  background: #fff0ee;
+  border-color: #a33026;
+  color: #8b2820;
+}
+.notice {
+  background: #eef6ef;
+  border-color: #35743b;
+  color: #29592e;
+}
+.card {
+  padding: 26px;
+  border: 1px solid #d4d9df;
+  background: var(--surface);
+  border-radius: 8px;
+  margin: 18px 0;
+}
+.card p {
+  line-height: 1.6;
+}
+.cardTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cardTitle h3 {
+  margin: 0;
+  font-size: 18px;
+}
+.status {
+  color: var(--muted);
+  background: var(--soft);
+  padding: 5px 9px;
+  border-radius: 4px;
+  font-size: 13px;
+  text-transform: capitalize;
+}
+.form {
+  display: grid;
+  gap: 16px;
+  max-width: 740px;
+  margin-top: 20px;
+}
+.form label:not(.check) {
+  display: grid;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.form :is(input:not([type="checkbox"]), textarea) {
+  border: 1px solid #9fa9b4;
+  border-radius: 4px;
+  padding: 11px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  width: 100%;
+}
+.form textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+.form button {
+  justify-self: start;
+}
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  line-height: 1.5;
+  font-size: 14px;
+}
+.check input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin-top: 2px;
+}
+.form fieldset {
+  padding: 20px;
+  border: 1px solid #bfc7d0;
+  display: grid;
+  gap: 16px;
+}
+.form legend {
+  font-size: 14px;
+  font-weight: 600;
+}
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.totals {
+  max-width: 660px;
+  margin: 20px 0;
+}
+.totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 9px 0;
+  border-bottom: 1px solid #e8ebee;
+}
+.totals dd {
+  margin: 0;
+  white-space: nowrap;
+}
+.address {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.artifact {
+  display: grid;
+  gap: 10px;
+  font-size: 14px;
+}
+.artifact code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.secret {
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.orderList {
+  display: grid;
+  gap: 8px;
+}
+.orderList button {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  text-align: left;
+  flex-wrap: wrap;
+}
+.timeline {
+  padding-left: 20px;
+}
+.timeline li {
+  padding: 8px 0;
+  text-transform: capitalize;
+}
+.timeline time {
+  display: block;
+  color: #626d78;
+  font-size: 13px;
+  margin-top: 4px;
+}
+@media (max-width: 640px) {
+  .workspace {
+    padding: 28px 16px 60px;
+  }
+  .header {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .card {
+    padding: 18px;
+  }
+  .address {
+    grid-template-columns: 1fr;
+  }
+}

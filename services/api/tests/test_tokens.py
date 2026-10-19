@@ -1,8 +1,9 @@
 """Access, opaque, and CSRF token tests."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import jwt
 import pytest
 
 from xxx_api.config import Settings
@@ -52,6 +53,38 @@ def test_access_token_rejects_wrong_audience() -> None:
 
     with pytest.raises(ValueError, match="invalid access token"):
         decode_access_token(token, verifier)
+
+
+@pytest.mark.parametrize("invalid_claim", ["expired", "issuer", "signature", "algorithm", "nbf"])
+def test_claim_checks_stay_enabled_across_repeated_decodes(invalid_claim: str) -> None:
+    settings = Settings(environment="test")
+    valid = issue_access_token(
+        user_id=uuid4(), session_id=uuid4(), role=Role.BUYER, settings=settings
+    )
+    claims = jwt.decode(
+        valid,
+        settings.jwt_signing_secret.get_secret_value(),
+        algorithms=[settings.jwt_algorithm],
+        audience=settings.jwt_audience,
+        issuer=settings.jwt_issuer,
+    )
+    secret = settings.jwt_signing_secret.get_secret_value()
+    algorithm = settings.jwt_algorithm
+    if invalid_claim == "expired":
+        claims["exp"] = int((datetime.now(UTC) - timedelta(hours=1)).timestamp())
+    elif invalid_claim == "issuer":
+        claims["iss"] = "untrusted-issuer"
+    elif invalid_claim == "signature":
+        secret = "untrusted-signing-key-at-least-thirty-two-bytes"
+    elif invalid_claim == "algorithm":
+        algorithm = "HS384"
+    else:
+        claims["nbf"] = int((datetime.now(UTC) + timedelta(hours=1)).timestamp())
+    invalid = jwt.encode(claims, secret, algorithm=algorithm)
+    for _ in range(2):
+        decode_access_token(valid, settings)
+        with pytest.raises(ValueError, match="invalid access token"):
+            decode_access_token(invalid, settings)
 
 
 def test_opaque_token_digest_is_keyed_and_verifiable() -> None:

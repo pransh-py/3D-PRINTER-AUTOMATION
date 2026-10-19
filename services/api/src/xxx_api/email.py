@@ -24,11 +24,25 @@ class EmailSender(Protocol):
         """Send one password-reset link."""
 
 
+class NoticeSender(Protocol):
+    async def send_notice(
+        self, recipient: str, *, subject: str, body: str, message_id: str
+    ) -> None:
+        """Submit one generic status notice; raises sanitized EmailDeliveryError."""
+
+
 class SmtpEmailSender:
     """Send transactional mail through any standards-compliant SMTP provider."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+
+    async def send_notice(
+        self, recipient: str, *, subject: str, body: str, message_id: str
+    ) -> None:
+        message = self._message(recipient=recipient, subject=subject, body=body)
+        message["Message-ID"] = message_id
+        await self._deliver(message)
 
     async def send_verification(self, recipient: str, raw_token: str) -> None:
         link = f"{str(self._settings.public_web_url).rstrip('/')}/verify-email#token={raw_token}"

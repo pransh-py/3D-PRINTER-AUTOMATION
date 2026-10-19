@@ -49,8 +49,10 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _is_safe_request_id(value: str) -> bool:
-        return bool(value) and len(value) <= 64 and all(
-            character.isalnum() or character in "-_" for character in value
+        return (
+            bool(value)
+            and len(value) <= 64
+            and all(character.isalnum() or character in "-_" for character in value)
         )
 
 
@@ -60,7 +62,7 @@ class AuthResponseSecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
         api_prefix = request.app.state.settings.api_prefix
-        if request.url.path.startswith(f"{api_prefix}/auth"):
+        if request.url.path.startswith(f"{api_prefix}/"):
             response.headers["Cache-Control"] = "no-store"
             response.headers["Pragma"] = "no-cache"
             response.headers["X-Content-Type-Options"] = "nosniff"

@@ -6,7 +6,7 @@
 
 ## Context
 
-The public application has two roles: `buyer` and `owner`. Buyers register publicly; owner accounts are provisioned administratively. The web and API are separate services, and the platform handles private model files, manual payment verification, and physical printer actions. Session compromise therefore has direct privacy, financial, and physical consequences.
+The public application has two roles: `buyer` and `owner`. Buyers register publicly; owner accounts are provisioned administratively. The web and API are separate services, and the platform handles private model files, Razorpay payment operations with manual-fallback verification, and physical printer actions. Session compromise therefore has direct privacy, financial, and physical consequences.
 
 ## Decision
 
@@ -20,7 +20,7 @@ The public application has two roles: `buyer` and `owner`. Buyers register publi
 - Use independent 256-bit opaque one-time tokens for email verification and password reset. Store only digests, purposes, expiry, and consumption state.
 - Protect cookie-authenticated state changes with a signed double-submit CSRF token bound to the persisted session ID and checked using constant-time comparison.
 - Require verified email before normal buyer login. Disabled users and revoked sessions fail closed.
-- Create owner accounts only through an explicit administrative operation. Owner MFA is a required later gate before payment verification or printer control.
+- Create owner accounts only through an explicit administrative operation. Owner MFA is a required later gate before payment exceptions/refunds, manual-fallback verification, or printer control.
 - Use SQLAlchemy 2 async sessions scoped to one request/task and Alembic-reviewed migrations.
 
 ## Cookie policy

@@ -331,8 +331,7 @@ def _build_session_issue(
         ),
         refresh_token=refresh_token,
         csrf_token=issue_csrf_token(session_id, settings),
-        access_expires_at=issued_at
-        + timedelta(seconds=settings.access_token_ttl_seconds),
+        access_expires_at=issued_at + timedelta(seconds=settings.access_token_ttl_seconds),
         refresh_expires_at=refresh_expires_at,
     )
 
@@ -434,9 +433,7 @@ async def login(
         )
         if enabled_mfa is not None:
             challenge = issue_opaque_token(settings)
-            expires_at = authenticated_at + timedelta(
-                seconds=settings.mfa_challenge_ttl_seconds
-            )
+            expires_at = authenticated_at + timedelta(seconds=settings.mfa_challenge_ttl_seconds)
             await session.execute(
                 update(OneTimeToken)
                 .where(
@@ -681,11 +678,7 @@ async def request_password_reset(
     user = await session.scalar(
         select(User).where(User.email == normalized_email).with_for_update()
     )
-    if (
-        user is None
-        or user.status is not UserStatus.ACTIVE
-        or user.email_verified_at is None
-    ):
+    if user is None or user.status is not UserStatus.ACTIVE or user.email_verified_at is None:
         await session.rollback()
         return None
 

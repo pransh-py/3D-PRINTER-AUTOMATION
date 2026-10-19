@@ -173,7 +173,11 @@ def test_quote_upload_is_private_idempotent_and_quarantined_before_submit() -> N
             assert submitted.analysis_runs[0].request_version == 2
         async with sessions() as session:
             runs = list(await session.scalars(select(AnalysisRun)))
-            outbox = list(await session.scalars(select(OutboxEvent)))
+            outbox = list(
+                await session.scalars(
+                    select(OutboxEvent).where(OutboxEvent.topic == "analysis.requested")
+                )
+            )
             assert len(runs) == 1
             assert len(outbox) == 1
             assert outbox[0].topic == "analysis.requested"
@@ -182,6 +186,17 @@ def test_quote_upload_is_private_idempotent_and_quarantined_before_submit() -> N
                 "analysis_run_id": str(runs[0].id),
                 "quote_request_id": str(quote.id),
                 "request_version": 2,
+            }
+            notices = list(
+                await session.scalars(
+                    select(OutboxEvent).where(OutboxEvent.topic == "notification.requested")
+                )
+            )
+            assert len(notices) == 1
+            assert notices[0].payload == {
+                "schemaVersion": 1,
+                "recipientUserId": str(owner.id),
+                "templateCode": "owner.request_submitted",
             }
         async with sessions() as session:
             events = list(await session.scalars(select(AuditEvent)))

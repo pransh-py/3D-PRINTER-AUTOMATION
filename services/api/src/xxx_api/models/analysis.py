@@ -75,6 +75,8 @@ class AnalysisRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     slicer_name: Mapped[str | None] = mapped_column(String(64))
     slicer_version: Mapped[str | None] = mapped_column(String(64))
     profile_sha256: Mapped[str | None] = mapped_column(String(64))
+    material_code: Mapped[str | None] = mapped_column(String(32))
+    print_preset_code: Mapped[str | None] = mapped_column(String(32))
     queued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -171,6 +173,8 @@ class AnalysisAssetResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     duration_seconds: Mapped[int | None] = mapped_column(BigInteger)
     artifact_storage_key: Mapped[str | None] = mapped_column(String(512))
     artifact_sha256: Mapped[str | None] = mapped_column(String(64))
+    preview_storage_key: Mapped[str | None] = mapped_column(String(512))
+    preview_sha256: Mapped[str | None] = mapped_column(String(64))
     failure_code: Mapped[str | None] = mapped_column(String(64))
 
     analysis_run: Mapped[AnalysisRun] = relationship(back_populates="asset_results")

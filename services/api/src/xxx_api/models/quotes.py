@@ -7,6 +7,7 @@ from enum import Enum as PythonEnum
 from uuid import UUID
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     CheckConstraint,
     DateTime,
@@ -36,6 +37,11 @@ class QuoteRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("buyer_id", "client_token", name="uq_quote_requests_buyer_client"),
         CheckConstraint("version >= 1", name="ck_quote_requests_version_positive"),
+        CheckConstraint("quantity BETWEEN 1 AND 100", name="ck_quote_requests_quantity"),
+        CheckConstraint(
+            "fulfillment_mode IN ('pickup','local_delivery','shipping')",
+            name="ck_quote_requests_fulfillment",
+        ),
         Index("ix_quote_requests_buyer_created", "buyer_id", "created_at"),
         Index("ix_quote_requests_status_created", "status", "created_at"),
     )
@@ -60,6 +66,13 @@ class QuoteRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1", nullable=False)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    quantity: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    fulfillment_mode: Mapped[str] = mapped_column(
+        String(24), default="pickup", server_default="pickup"
+    )
+    buyer_notes: Mapped[str | None] = mapped_column(Text)
+    print_specification: Mapped[dict[str, object] | None] = mapped_column(JSON(none_as_null=True))
+    owner_rejection_reason: Mapped[str | None] = mapped_column(Text)
 
     assets: Mapped[list[ModelAsset]] = relationship(
         back_populates="quote_request",
@@ -72,6 +85,10 @@ class QuoteRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="AnalysisRun.request_version",
+    )
+    estimates: Mapped[list[QuoteEstimate]] = relationship(
+        back_populates="quote_request",
+        order_by="QuoteEstimate.quote_request_version",
     )
 
 
@@ -139,3 +156,4 @@ class ModelAsset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 
 from xxx_api.models.analysis import AnalysisRun  # noqa: E402
+from xxx_api.models.pricing import QuoteEstimate  # noqa: E402

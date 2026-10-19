@@ -1,8 +1,18 @@
 import { readCsrfCookie } from "./auth-api.ts";
+import {
+  parsePrintSpecification,
+  type PrintSpecification,
+} from "./print-specification.ts";
 
 const QUOTE_API_BASE = "/api/v1/quote-requests";
 
-export const SUPPORTED_MODEL_EXTENSIONS = [".stl", ".3mf", ".obj", ".step", ".stp"] as const;
+export const SUPPORTED_MODEL_EXTENSIONS = [
+  ".stl",
+  ".3mf",
+  ".obj",
+  ".step",
+  ".stp",
+] as const;
 export const MAX_MODEL_FILE_BYTES = 100 * 1024 * 1024;
 export const MAX_MODEL_FILES_PER_QUOTE = 5;
 
@@ -17,17 +27,15 @@ export type QuoteRequestStatus =
   | "rejected";
 
 export type ModelAssetStatus =
-  | "pending_upload"
-  | "quarantined"
-  | "validating"
-  | "validated"
-  | "rejected";
+  "pending_upload" | "quarantined" | "validating" | "validated" | "rejected";
 
 export type ModelFormat = "stl" | "3mf" | "obj" | "step";
 
-export type AnalysisRunStatus = "queued" | "running" | "awaiting_profile" | "succeeded" | "failed";
+export type AnalysisRunStatus =
+  "queued" | "running" | "awaiting_profile" | "succeeded" | "failed";
 
-export type AnalysisAssetStatus = "validated" | "awaiting_profile" | "sliced" | "rejected";
+export type AnalysisAssetStatus =
+  "validated" | "awaiting_profile" | "sliced" | "rejected";
 
 export type ModelAsset = Readonly<{
   id: string;
@@ -57,6 +65,7 @@ export type AnalysisAssetResult = Readonly<{
   filamentMg: number | null;
   durationSeconds: number | null;
   failureCode: string | null;
+  previewUrl?: string | null;
 }>;
 
 export type AnalysisRun = Readonly<{
@@ -68,11 +77,35 @@ export type AnalysisRun = Readonly<{
   slicerName: string | null;
   slicerVersion: string | null;
   profileSha256: string | null;
+  materialCode: string | null;
   queuedAt: string;
   startedAt: string | null;
   completedAt: string | null;
   failureCode: string | null;
   assets: readonly AnalysisAssetResult[];
+}>;
+
+export type QuoteEstimate = Readonly<{
+  id: string;
+  quoteRequestVersion: number;
+  analysisRunId: string;
+  pricingPolicyVersion: number;
+  calculationVersion: string;
+  currency: "INR";
+  materialCode: string;
+  materialName: string;
+  filamentMg: number;
+  durationSeconds: number;
+  materialPaise: number;
+  machinePaise: number;
+  setupPaise: number;
+  contingencyPaise: number;
+  minimumAdjustmentPaise: number;
+  preTaxPaise: number;
+  taxPaise: number;
+  totalPaise: number;
+  expiresAt: string;
+  createdAt: string;
 }>;
 
 export type QuoteRequest = Readonly<{
@@ -85,6 +118,12 @@ export type QuoteRequest = Readonly<{
   updatedAt: string;
   assets: readonly ModelAsset[];
   latestAnalysis: AnalysisRun | null;
+  latestEstimate: QuoteEstimate | null;
+  quantity: number;
+  fulfillmentMode: "pickup" | "local_delivery" | "shipping";
+  buyerNotes: string | null;
+  ownerRejectionReason: string | null;
+  printSpecification?: PrintSpecification | null;
 }>;
 
 export type QuoteRequestList = Readonly<{
@@ -98,6 +137,7 @@ export type PresignedUpload = Readonly<{
   url: string;
   fields: Readonly<Record<string, string>>;
   expiresAt: string;
+  method?: "POST" | "PUT";
 }>;
 
 export type ModelUploadIntent = Readonly<{
@@ -105,7 +145,8 @@ export type ModelUploadIntent = Readonly<{
   upload: PresignedUpload;
 }>;
 
-export type ModelFileRejectionReason = "unsupported_format" | "empty_file" | "file_too_large";
+export type ModelFileRejectionReason =
+  "unsupported_format" | "empty_file" | "file_too_large";
 
 export type ModelFileRejection = Readonly<{
   file: File;
@@ -122,7 +163,11 @@ export class QuoteApiError extends Error {
   readonly status: number;
   readonly retryAfterSeconds: number | null;
 
-  constructor(message: string, status: number, retryAfterSeconds: number | null = null) {
+  constructor(
+    message: string,
+    status: number,
+    retryAfterSeconds: number | null = null,
+  ) {
     super(message);
     this.name = "QuoteApiError";
     this.status = status;
@@ -167,7 +212,10 @@ function parseRetryAfter(response: Response): number | null {
 function requiredCsrfToken(cookieString: string): string {
   const token = readCsrfCookie(cookieString);
   if (token === null) {
-    throw new QuoteApiError("Your session has expired. Please sign in again.", 401);
+    throw new QuoteApiError(
+      "Your session has expired. Please sign in again.",
+      401,
+    );
   }
   return token;
 }
@@ -200,7 +248,10 @@ async function request(
       cache: "no-store",
     });
   } catch {
-    throw new QuoteApiError("The quote service is unavailable. Please try again.", 0);
+    throw new QuoteApiError(
+      "The quote service is unavailable. Please try again.",
+      0,
+    );
   }
 
   if (!response.ok) {
@@ -217,7 +268,10 @@ async function request(
   }
   const payload = await readPayload(response);
   if (payload === null) {
-    throw new QuoteApiError("The quote service returned an invalid response.", 502);
+    throw new QuoteApiError(
+      "The quote service returned an invalid response.",
+      502,
+    );
   }
   return payload;
 }
@@ -260,7 +314,8 @@ const ANALYSIS_ASSET_STATUSES = new Set<string>([
 
 const HEX_SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ISO_TIMESTAMP_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
@@ -276,11 +331,20 @@ function isPositiveInteger(value: unknown): value is number {
 }
 
 function isNullableHex64(value: unknown): value is string | null {
-  return value === null || (typeof value === "string" && HEX_SHA256_PATTERN.test(value));
+  return (
+    value === null ||
+    (typeof value === "string" && HEX_SHA256_PATTERN.test(value))
+  );
 }
 
-function isDimensionsTriple(value: unknown): value is readonly [number, number, number] {
-  return Array.isArray(value) && value.length === 3 && value.every(isNonNegativeInteger);
+function isDimensionsTriple(
+  value: unknown,
+): value is readonly [number, number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 3 &&
+    value.every(isNonNegativeInteger)
+  );
 }
 
 /** Strict RFC 4122 UUID shape check, used for the analysis run and asset-result identifiers. */
@@ -325,7 +389,16 @@ function isIsoTimestamp(value: unknown): value is string {
   if (match === null) {
     return false;
   }
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText, offsetText] = match;
+  const [
+    ,
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText,
+    offsetText,
+  ] = match;
   const year = Number(yearText);
   const month = Number(monthText);
   const day = Number(dayText);
@@ -356,15 +429,21 @@ function parseModelAsset(payload: unknown): ModelAsset {
     typeof payload.status !== "string" ||
     !MODEL_ASSET_STATUSES.has(payload.status) ||
     typeof payload.expectedSizeBytes !== "number" ||
-    (payload.actualSizeBytes !== null && typeof payload.actualSizeBytes !== "number") ||
+    (payload.actualSizeBytes !== null &&
+      typeof payload.actualSizeBytes !== "number") ||
     typeof payload.claimedSha256 !== "string" ||
-    (payload.verifiedSha256 !== null && typeof payload.verifiedSha256 !== "string") ||
+    (payload.verifiedSha256 !== null &&
+      typeof payload.verifiedSha256 !== "string") ||
     typeof payload.uploadExpiresAt !== "string" ||
     (payload.uploadedAt !== null && typeof payload.uploadedAt !== "string") ||
-    (payload.rejectionCode !== null && typeof payload.rejectionCode !== "string") ||
+    (payload.rejectionCode !== null &&
+      typeof payload.rejectionCode !== "string") ||
     typeof payload.createdAt !== "string"
   ) {
-    throw new QuoteApiError("The quote service returned an invalid model response.", 502);
+    throw new QuoteApiError(
+      "The quote service returned an invalid model response.",
+      502,
+    );
   }
   return {
     id: payload.id,
@@ -389,26 +468,43 @@ function parseAnalysisAssetResult(payload: unknown): AnalysisAssetResult {
     typeof payload.status !== "string" ||
     !ANALYSIS_ASSET_STATUSES.has(payload.status) ||
     (payload.detectedFormat !== null &&
-      (typeof payload.detectedFormat !== "string" || !MODEL_FORMATS.has(payload.detectedFormat))) ||
+      (typeof payload.detectedFormat !== "string" ||
+        !MODEL_FORMATS.has(payload.detectedFormat))) ||
     !isNullableHex64(payload.verifiedSha256) ||
-    (payload.dimensionsUm !== null && !isDimensionsTriple(payload.dimensionsUm)) ||
-    (payload.triangleCount !== null && !isNonNegativeInteger(payload.triangleCount)) ||
-    (payload.objectCount !== null && !isNonNegativeInteger(payload.objectCount)) ||
-    (payload.fitsBuildVolume !== null && typeof payload.fitsBuildVolume !== "boolean") ||
+    (payload.dimensionsUm !== null &&
+      !isDimensionsTriple(payload.dimensionsUm)) ||
+    (payload.triangleCount !== null &&
+      !isNonNegativeInteger(payload.triangleCount)) ||
+    (payload.objectCount !== null &&
+      !isNonNegativeInteger(payload.objectCount)) ||
+    (payload.fitsBuildVolume !== null &&
+      typeof payload.fitsBuildVolume !== "boolean") ||
     !Array.isArray(payload.warningCodes) ||
     !payload.warningCodes.every((code) => typeof code === "string") ||
-    (payload.filamentMg !== null && !isNonNegativeInteger(payload.filamentMg)) ||
-    (payload.durationSeconds !== null && !isNonNegativeInteger(payload.durationSeconds)) ||
-    (payload.failureCode !== null && typeof payload.failureCode !== "string")
+    (payload.filamentMg !== null &&
+      !isNonNegativeInteger(payload.filamentMg)) ||
+    (payload.durationSeconds !== null &&
+      !isNonNegativeInteger(payload.durationSeconds)) ||
+    (payload.failureCode !== null && typeof payload.failureCode !== "string") ||
+    (payload.previewUrl !== undefined &&
+      payload.previewUrl !== null &&
+      (typeof payload.previewUrl !== "string" ||
+        !/^\/api\/v1\/quote-requests\/previews\/[0-9a-f-]{36}$/.test(
+          payload.previewUrl,
+        )))
   ) {
-    throw new QuoteApiError("The quote service returned an invalid analysis result.", 502);
+    throw new QuoteApiError(
+      "The quote service returned an invalid analysis result.",
+      502,
+    );
   }
   return {
     assetId: payload.assetId,
     status: payload.status as AnalysisAssetStatus,
     detectedFormat: payload.detectedFormat as ModelFormat | null,
     verifiedSha256: payload.verifiedSha256 as string | null,
-    dimensionsUm: payload.dimensionsUm as readonly [number, number, number] | null,
+    dimensionsUm: payload.dimensionsUm as
+      readonly [number, number, number] | null,
     triangleCount: payload.triangleCount as number | null,
     objectCount: payload.objectCount as number | null,
     fitsBuildVolume: payload.fitsBuildVolume as boolean | null,
@@ -416,6 +512,8 @@ function parseAnalysisAssetResult(payload: unknown): AnalysisAssetResult {
     filamentMg: payload.filamentMg as number | null,
     durationSeconds: payload.durationSeconds as number | null,
     failureCode: payload.failureCode as string | null,
+    previewUrl:
+      typeof payload.previewUrl === "string" ? payload.previewUrl : null,
   };
 }
 
@@ -430,15 +528,21 @@ function parseAnalysisRun(payload: unknown): AnalysisRun {
     typeof payload.validatorVersion !== "string" ||
     payload.validatorVersion.length === 0 ||
     (payload.slicerName !== null && typeof payload.slicerName !== "string") ||
-    (payload.slicerVersion !== null && typeof payload.slicerVersion !== "string") ||
+    (payload.slicerVersion !== null &&
+      typeof payload.slicerVersion !== "string") ||
     !isNullableHex64(payload.profileSha256) ||
+    (payload.materialCode !== null &&
+      typeof payload.materialCode !== "string") ||
     !isIsoTimestamp(payload.queuedAt) ||
     !isNullableIsoTimestamp(payload.startedAt) ||
     !isNullableIsoTimestamp(payload.completedAt) ||
     (payload.failureCode !== null && typeof payload.failureCode !== "string") ||
     !Array.isArray(payload.assets)
   ) {
-    throw new QuoteApiError("The quote service returned an invalid analysis response.", 502);
+    throw new QuoteApiError(
+      "The quote service returned an invalid analysis response.",
+      502,
+    );
   }
   return {
     id: payload.id,
@@ -449,6 +553,7 @@ function parseAnalysisRun(payload: unknown): AnalysisRun {
     slicerName: payload.slicerName as string | null,
     slicerVersion: payload.slicerVersion as string | null,
     profileSha256: payload.profileSha256 as string | null,
+    materialCode: payload.materialCode as string | null,
     queuedAt: payload.queuedAt,
     startedAt: payload.startedAt as string | null,
     completedAt: payload.completedAt as string | null,
@@ -457,7 +562,39 @@ function parseAnalysisRun(payload: unknown): AnalysisRun {
   };
 }
 
-function parseQuoteRequest(payload: unknown): QuoteRequest {
+function parseQuoteEstimate(payload: unknown): QuoteEstimate {
+  if (
+    !isRecord(payload) ||
+    !isUuid(payload.id) ||
+    !isPositiveInteger(payload.quoteRequestVersion) ||
+    !isUuid(payload.analysisRunId) ||
+    !isPositiveInteger(payload.pricingPolicyVersion) ||
+    typeof payload.calculationVersion !== "string" ||
+    payload.currency !== "INR" ||
+    typeof payload.materialCode !== "string" ||
+    typeof payload.materialName !== "string" ||
+    !isNonNegativeInteger(payload.filamentMg) ||
+    !isNonNegativeInteger(payload.durationSeconds) ||
+    !isNonNegativeInteger(payload.materialPaise) ||
+    !isNonNegativeInteger(payload.machinePaise) ||
+    !isNonNegativeInteger(payload.setupPaise) ||
+    !isNonNegativeInteger(payload.contingencyPaise) ||
+    !isNonNegativeInteger(payload.minimumAdjustmentPaise) ||
+    !isNonNegativeInteger(payload.preTaxPaise) ||
+    !isNonNegativeInteger(payload.taxPaise) ||
+    !isNonNegativeInteger(payload.totalPaise) ||
+    !isIsoTimestamp(payload.expiresAt) ||
+    !isIsoTimestamp(payload.createdAt)
+  ) {
+    throw new QuoteApiError(
+      "The quote service returned an invalid estimate.",
+      502,
+    );
+  }
+  return payload as QuoteEstimate;
+}
+
+export function parseQuoteRequest(payload: unknown): QuoteRequest {
   if (
     !isRecord(payload) ||
     typeof payload.id !== "string" ||
@@ -469,21 +606,44 @@ function parseQuoteRequest(payload: unknown): QuoteRequest {
     typeof payload.createdAt !== "string" ||
     typeof payload.updatedAt !== "string" ||
     !Array.isArray(payload.assets) ||
-    (payload.latestAnalysis !== null && !isRecord(payload.latestAnalysis))
+    (payload.latestAnalysis !== null && !isRecord(payload.latestAnalysis)) ||
+    (payload.latestEstimate !== null && !isRecord(payload.latestEstimate))
   ) {
-    throw new QuoteApiError("The quote service returned an invalid response.", 502);
+    throw new QuoteApiError(
+      "The quote service returned an invalid response.",
+      502,
+    );
   }
   return {
     id: payload.id,
     buyerId: payload.buyerId,
     status: payload.status as QuoteRequestStatus,
     version: payload.version,
+    quantity: typeof payload.quantity === "number" ? payload.quantity : 1,
+    fulfillmentMode:
+      payload.fulfillmentMode === "shipping" ||
+      payload.fulfillmentMode === "local_delivery"
+        ? payload.fulfillmentMode
+        : "pickup",
+    buyerNotes:
+      typeof payload.buyerNotes === "string" ? payload.buyerNotes : null,
+    ownerRejectionReason:
+      typeof payload.ownerRejectionReason === "string"
+        ? payload.ownerRejectionReason
+        : null,
+    printSpecification: parsePrintSpecification(payload.printSpecification),
     submittedAt: payload.submittedAt as string | null,
     createdAt: payload.createdAt,
     updatedAt: payload.updatedAt,
     assets: payload.assets.map(parseModelAsset),
     latestAnalysis:
-      payload.latestAnalysis === null ? null : parseAnalysisRun(payload.latestAnalysis),
+      payload.latestAnalysis === null
+        ? null
+        : parseAnalysisRun(payload.latestAnalysis),
+    latestEstimate:
+      payload.latestEstimate === null
+        ? null
+        : parseQuoteEstimate(payload.latestEstimate),
   };
 }
 
@@ -495,7 +655,10 @@ function parseQuoteRequestList(payload: unknown): QuoteRequestList {
     typeof payload.limit !== "number" ||
     typeof payload.offset !== "number"
   ) {
-    throw new QuoteApiError("The quote service returned an invalid list response.", 502);
+    throw new QuoteApiError(
+      "The quote service returned an invalid list response.",
+      502,
+    );
   }
   return {
     items: payload.items.map(parseQuoteRequest),
@@ -507,7 +670,10 @@ function parseQuoteRequestList(payload: unknown): QuoteRequestList {
 
 function parseModelUploadIntent(payload: unknown): ModelUploadIntent {
   if (!isRecord(payload) || !isRecord(payload.upload)) {
-    throw new QuoteApiError("The quote service returned an invalid upload response.", 502);
+    throw new QuoteApiError(
+      "The quote service returned an invalid upload response.",
+      502,
+    );
   }
   const upload = payload.upload;
   if (
@@ -516,7 +682,10 @@ function parseModelUploadIntent(payload: unknown): ModelUploadIntent {
     !Object.values(upload.fields).every((value) => typeof value === "string") ||
     typeof upload.expiresAt !== "string"
   ) {
-    throw new QuoteApiError("The quote service returned an invalid upload response.", 502);
+    throw new QuoteApiError(
+      "The quote service returned an invalid upload response.",
+      502,
+    );
   }
   return {
     asset: parseModelAsset(payload.asset),
@@ -524,6 +693,7 @@ function parseModelUploadIntent(payload: unknown): ModelUploadIntent {
       url: upload.url,
       fields: upload.fields as Record<string, string>,
       expiresAt: upload.expiresAt,
+      method: upload.method === "PUT" ? "PUT" : "POST",
     },
   };
 }
@@ -534,12 +704,16 @@ function fileExtension(filename: string): string {
 }
 
 /** Rejects unsupported, zero-byte, oversized, or too-numerous files before any network work. */
-export function validateModelSelection(files: readonly File[]): ModelSelectionValidation {
+export function validateModelSelection(
+  files: readonly File[],
+): ModelSelectionValidation {
   const rejected: ModelFileRejection[] = [];
   const accepted: File[] = [];
   for (const file of files) {
     const extension = fileExtension(file.name);
-    if (!(SUPPORTED_MODEL_EXTENSIONS as readonly string[]).includes(extension)) {
+    if (
+      !(SUPPORTED_MODEL_EXTENSIONS as readonly string[]).includes(extension)
+    ) {
       rejected.push({ file, reason: "unsupported_format" });
       continue;
     }
@@ -572,11 +746,18 @@ export async function computeFileSha256(file: File): Promise<string> {
 export async function createQuoteRequest(
   clientToken: string,
   cookieString: string,
+  requirements?: {
+    quantity: number;
+    fulfillmentMode: "pickup" | "local_delivery" | "shipping";
+    buyerNotes: string;
+    printPresetCode?: string;
+    colour?: string | null;
+  },
 ): Promise<QuoteRequest> {
   return parseQuoteRequest(
     await request("", {
       method: "POST",
-      body: { clientToken },
+      body: { clientToken, ...requirements },
       csrfToken: requiredCsrfToken(cookieString),
     }),
   );
@@ -586,7 +767,9 @@ export async function listQuoteRequests(
   limit = 20,
   offset = 0,
 ): Promise<QuoteRequestList> {
-  return parseQuoteRequestList(await request(`?limit=${limit}&offset=${offset}`));
+  return parseQuoteRequestList(
+    await request(`?limit=${limit}&offset=${offset}`),
+  );
 }
 
 export async function issueModelUpload(
@@ -613,7 +796,35 @@ export async function issueModelUpload(
  * Every returned field is appended first, then the file is appended last as "file".
  * No credentials or custom headers are sent to the storage endpoint.
  */
-export async function uploadModelToStorage(upload: PresignedUpload, file: File): Promise<void> {
+export async function uploadModelToStorage(
+  upload: PresignedUpload,
+  file: File,
+): Promise<void> {
+  if (upload.method === "PUT") {
+    if (
+      !/^\/api\/v1\/quote-requests\/[a-f0-9-]{36}\/uploads\/[a-f0-9-]{36}\/content$/.test(
+        upload.url,
+      )
+    ) {
+      throw new QuoteApiError("The local upload destination is invalid.", 502);
+    }
+    const csrf = requiredCsrfToken(document.cookie);
+    const response = await fetch(upload.url, {
+      method: "PUT",
+      body: file,
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-CSRF-Token": csrf,
+      },
+    });
+    if (!response.ok)
+      throw new QuoteApiError(
+        "The local upload was rejected. Please try again.",
+        response.status,
+      );
+    return;
+  }
   const formData = new FormData();
   for (const [name, value] of Object.entries(upload.fields)) {
     formData.append(name, value);
@@ -624,7 +835,10 @@ export async function uploadModelToStorage(upload: PresignedUpload, file: File):
   try {
     response = await fetch(upload.url, { method: "POST", body: formData });
   } catch {
-    throw new QuoteApiError("The upload could not reach private storage. Please try again.", 0);
+    throw new QuoteApiError(
+      "The upload could not reach private storage. Please try again.",
+      0,
+    );
   }
   if (!response.ok) {
     throw new QuoteApiError(

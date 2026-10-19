@@ -56,7 +56,7 @@ history before owner APIs are added.
 - `require_owner` denies buyers regardless of client state or JWT role alone.
 - `require_recent_owner_mfa` additionally requires enabled MFA and an MFA-authenticated
   session no older than the configured ten-minute window.
-- Future payment verification, price overrides, refunds, printer commands, beneficiary
+- Future payment exceptions, manual-fallback verification, price overrides, refunds, printer commands, beneficiary
   changes, exports, and credential changes must use the recent-MFA dependency.
 
 ## Audit decision

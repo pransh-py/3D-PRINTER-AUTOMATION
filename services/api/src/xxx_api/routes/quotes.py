@@ -1,5 +1,8 @@
 """Authenticated quote-request and private model-upload HTTP adapters."""
 
+from asyncio import timeout
+from datetime import UTC, datetime
+from ipaddress import ip_address
 from typing import Annotated
 from uuid import UUID
 
@@ -15,14 +18,20 @@ from xxx_api.dependencies import (
     get_runtime_settings,
     require_trusted_origin,
 )
+from xxx_api.domain.quotes import ModelAssetStatus, QuoteRequestStatus
+from xxx_api.domain.roles import Role
+from xxx_api.local_storage import LocalObjectStorage
 from xxx_api.models.analysis import AnalysisAssetResult, AnalysisRun
+from xxx_api.models.pricing import QuoteEstimate
 from xxx_api.models.quotes import ModelAsset, QuoteRequest
+from xxx_api.print_presets import PresetConfigurationError
 from xxx_api.rate_limit import (
     RateLimiter,
     RateLimitExceededError,
     RateLimitRule,
     RateLimitUnavailableError,
 )
+from xxx_api.schemas.pricing import QuoteEstimateResponse
 from xxx_api.schemas.quotes import (
     AnalysisAssetResultResponse,
     AnalysisRunResponse,
@@ -34,6 +43,7 @@ from xxx_api.schemas.quotes import (
     QuoteRequestListResponse,
     QuoteRequestResponse,
 )
+from xxx_api.services.print_catalogue import available_print_presets
 from xxx_api.services.quotes import (
     InvalidModelUploadError,
     ModelUploadNotFoundError,
@@ -161,6 +171,9 @@ def _analysis_asset_response(result: AnalysisAssetResult) -> AnalysisAssetResult
         filamentMg=result.filament_mg,
         durationSeconds=result.duration_seconds,
         failureCode=result.failure_code,
+        previewUrl=(
+            f"/api/v1/quote-requests/previews/{result.id}" if result.preview_storage_key else None
+        ),
     )
 
 
@@ -174,6 +187,8 @@ def _analysis_response(run: AnalysisRun) -> AnalysisRunResponse:
         slicerName=run.slicer_name,
         slicerVersion=run.slicer_version,
         profileSha256=run.profile_sha256,
+        materialCode=run.material_code,
+        printPresetCode=run.print_preset_code,
         queuedAt=run.queued_at,
         startedAt=run.started_at,
         completedAt=run.completed_at,
@@ -182,19 +197,53 @@ def _analysis_response(run: AnalysisRun) -> AnalysisRunResponse:
     )
 
 
+def _estimate_response(estimate: "QuoteEstimate") -> QuoteEstimateResponse:
+    return QuoteEstimateResponse(
+        id=estimate.id,
+        quoteRequestVersion=estimate.quote_request_version,
+        analysisRunId=estimate.analysis_run_id,
+        pricingPolicyVersion=estimate.policy.version,
+        calculationVersion=estimate.calculation_version,
+        currency=estimate.currency,
+        materialCode=estimate.material_code,
+        materialName=estimate.material_name,
+        filamentMg=estimate.filament_mg,
+        durationSeconds=estimate.duration_seconds,
+        materialPaise=estimate.material_paise,
+        machinePaise=estimate.machine_paise,
+        setupPaise=estimate.setup_paise,
+        contingencyPaise=estimate.contingency_paise,
+        minimumAdjustmentPaise=estimate.minimum_adjustment_paise,
+        preTaxPaise=estimate.pre_tax_paise,
+        taxPaise=estimate.tax_paise,
+        totalPaise=estimate.total_paise,
+        expiresAt=estimate.expires_at,
+        createdAt=estimate.created_at,
+    )
+
+
 def _quote_response(quote: QuoteRequest) -> QuoteRequestResponse:
     latest_analysis = quote.analysis_runs[-1] if quote.analysis_runs else None
+    latest_estimate = quote.estimates[-1] if quote.estimates else None
     return QuoteRequestResponse(
         id=quote.id,
         buyerId=quote.buyer_id,
         status=quote.status,
         version=quote.version,
+        quantity=quote.quantity,
+        fulfillmentMode=quote.fulfillment_mode,
+        buyerNotes=quote.buyer_notes,
+        printSpecification=quote.print_specification,
+        ownerRejectionReason=quote.owner_rejection_reason,
         submittedAt=quote.submitted_at,
         createdAt=quote.created_at,
         updatedAt=quote.updated_at,
         assets=[_asset_response(asset) for asset in quote.assets],
         latestAnalysis=(
             _analysis_response(latest_analysis) if latest_analysis is not None else None
+        ),
+        latestEstimate=(
+            _estimate_response(latest_estimate) if latest_estimate is not None else None
         ),
     )
 
@@ -209,15 +258,36 @@ async def create_request(
     principal: CurrentPrincipal,
     session: DatabaseSession,
     limiter: Limiter,
+    settings: RuntimeSettings,
 ) -> QuoteRequestResponse:
     """Create one buyer-idempotent draft quote request."""
     _private(response)
     await _enforce_quote_creation_limit(limiter, request, principal.user.id)
+    specification = None
+    if payload.print_preset_code is not None or settings.analysis_preset_manifest is not None:
+        try:
+            presets = await available_print_presets(session, settings)
+            preset = next(
+                (item for item in presets if item.code == payload.print_preset_code), None
+            )
+            if preset is None:
+                raise HTTPException(422, "Choose a currently available print preset.")
+            specification = preset.specification(payload.colour)
+        except PresetConfigurationError as error:
+            raise HTTPException(
+                409, "Print options changed. Refresh and select them again."
+            ) from error
+    elif payload.colour is not None:
+        raise HTTPException(422, "A colour requires a selected print preset.")
     try:
         quote = await create_quote_request(
             session,
             buyer=principal.user,
             client_token=payload.client_token,
+            quantity=payload.quantity,
+            fulfillment_mode=payload.fulfillment_mode,
+            buyer_notes=payload.buyer_notes,
+            print_specification=specification,
             audit_request_id=_request_id(request),
         )
     except QuoteRequestConflictError as error:
@@ -325,8 +395,71 @@ async def issue_upload(
             url=issue.upload.url,
             fields=issue.upload.fields,
             expiresAt=issue.upload.expires_at,
+            method=issue.upload.method,
         ),
     )
+
+
+@router.put("/{request_id}/uploads/{asset_id}/content", status_code=204)
+async def upload_local_content(
+    request_id: UUID,
+    asset_id: UUID,
+    request: Request,
+    response: Response,
+    _origin: TrustedOrigin,
+    _csrf: SessionCsrf,
+    principal: CurrentPrincipal,
+    session: DatabaseSession,
+    storage: PrivateStorage,
+) -> None:
+    """Stream a local-only upload against its authenticated, unexpired database intent."""
+    _private(response)
+    if not isinstance(storage, LocalObjectStorage):
+        raise HTTPException(404, "Upload endpoint not available")
+    try:
+        local_client = request.client is not None and ip_address(request.client.host).is_loopback
+    except ValueError:
+        local_client = False
+    if not local_client:
+        raise HTTPException(403, "Local storage only accepts loopback requests")
+    if principal.user.role is not Role.BUYER:
+        raise HTTPException(404, "Upload not found")
+    try:
+        quote = await get_quote_request(session, user=principal.user, request_id=request_id)
+    except QuoteRequestNotFoundError as error:
+        raise HTTPException(404, "Upload not found") from error
+    asset = next((item for item in quote.assets if item.id == asset_id), None)
+    if asset is None:
+        raise HTTPException(404, "Upload not found")
+    expires = asset.upload_expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=UTC)
+    if (
+        quote.status is not QuoteRequestStatus.DRAFT
+        or asset.status is not ModelAssetStatus.PENDING_UPLOAD
+        or expires <= datetime.now(UTC)
+    ):
+        raise HTTPException(409, "This upload intent is no longer pending")
+    if request.headers.get("content-type") != "application/octet-stream":
+        raise HTTPException(415, "Upload model bytes as application/octet-stream")
+    length = request.headers.get("content-length")
+    if length is not None and (not length.isdecimal() or int(length) != asset.expected_size_bytes):
+        raise HTTPException(413, "Upload size does not match its intent")
+    try:
+        async with timeout(120):
+            await storage.receive(
+                asset.storage_key,
+                request.stream(),
+                expected_size=asset.expected_size_bytes,
+                expected_sha256=asset.claimed_sha256,
+                metadata={"asset-id": str(asset.id), "sha256": asset.claimed_sha256},
+            )
+    except TimeoutError as error:
+        raise HTTPException(408, "The upload timed out. Try again.") from error
+    except ObjectStorageError as error:
+        raise HTTPException(
+            422, "The upload could not be stored. Check its size and checksum."
+        ) from error
 
 
 @router.post("/{request_id}/uploads/{asset_id}/complete", response_model=ModelAssetResponse)

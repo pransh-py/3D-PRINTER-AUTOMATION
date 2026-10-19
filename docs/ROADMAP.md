@@ -1,5 +1,16 @@
 # `xxx` One-Week MVP Roadmap
 
+## Current priority override — October 19
+
+Business work is deferred by the owner. The local `/print` station is implemented for
+upload/configure/actual Orca slicing and single-send AD5X dispatch. The friend's printer has
+ZMOD, so the primary adapter targets Moonraker G-code upload-and-print. Local software and
+loopback protocol acceptance do not substitute for physical commissioning. Next: at the
+printer, confirm network mode/versions, known-working profiles, actual plate and spool mapping;
+then prove one supervised website-triggered print. See `VISIT_PREFLIGHT.md`.
+
+The existing business milestones below are preserved for later, not current prerequisites.
+
 ## Delivery principle
 
 Build verified vertical slices: each backend capability ships with the minimum buyer/owner UI and tests needed to exercise the real workflow. Defer visual polish and optional integrations until the ordering, payment, and printing state machine is reliable.
@@ -8,7 +19,7 @@ A production-quality public order system is achievable as a constrained MVP in o
 
 ## Day 0: contract and access
 
-- Confirm remaining pricing, materials, print presets, tax, fulfillment, UPI beneficiary, legal policies, branding, and Windows/AD5X details.
+- Confirm remaining pricing, materials, print presets, tax, fulfillment, Razorpay merchant/KYC ownership, test/live credentials, capture/settlement settings, manual-fallback beneficiary, legal policies, branding, and Windows/AD5X details.
 - Obtain safe development access to the Windows bridge computer and printer test window.
 - Confirm domain/hosting/email choices and create non-production credentials.
 - Freeze the MVP scope in `PRODUCT_REQUIREMENTS.md`.
@@ -38,10 +49,10 @@ production SMTP/Redis smoke testing and deployment owner enrollment remain relea
 
 Exit gate: approved sample models produce repeatable results; malicious/invalid/oversized samples fail closed; one buyer cannot access another's model.
 
-Current status: private upload intake, transactional analysis enqueueing, fenced Redis Stream
-delivery, bounded source validation, and buyer-safe analysis status UI are implemented. Real
-Orca-Flashforge slicing, previews, and repeatability comparison remain blocked on owner-exported
-AD5X machine/process/filament profiles and representative test models.
+Current status: private intake and validation are implemented. A pinned headless Orca adapter,
+measured-output parsing, private derived artifacts/previews and owner slicing retry are now
+implemented and locally tested with a labelled subprocess fixture. Actual Orca slicing and
+repeatability still require owner-exported AD5X profiles and representative models.
 
 ## Day 3: pricing, quotation, and order snapshots
 
@@ -52,16 +63,35 @@ AD5X machine/process/filament profiles and representative test models.
 
 Exit gate: stakeholder-approved sample cases match expected prices; historical accepted quotes do not change after rate updates.
 
-## Day 4: manual UPI and queue
+Current status: versioned owner rate cards, recent-MFA activation, integer-paise calculation,
+immutable analysis-linked estimate snapshots, owner administration UI, and buyer estimate display
+are implemented. No policy is seeded or active by default. Real rates, GST treatment, approved
+golden cases and actual AD5X metrics remain required for production acceptance. Owner issuance,
+reasoned adjustment/rejection, buyer acceptance and accepted-order snapshots are implemented
+with buyer/owner screens. See `LOCAL_WORKFLOW.md` for verified scope and remaining gates.
 
-- Implement versioned UPI beneficiary configuration and exact payment-intent display.
-- Implement buyer UTR/evidence claim, duplicate detection, and owner verification with MFA/recent-authentication checks.
-- Implement auditable paid transition, transactional outbox, print-job creation, and queue UI.
-- Implement cancellation/refund-record placeholders and owner action dashboard.
+## Day 4: Razorpay Checkout and queue
 
-Exit gate: no buyer/API manipulation can self-verify payment or enqueue an unpaid job; duplicate events remain single-effect.
+Current status: disabled-by-default Checkout, callback/raw-webhook HMAC, exact current provider
+correlation, interrupted-create receipt recovery and worker/API reconciliation are implemented.
+PostgreSQL concurrency and fictional-provider HTTP tests passed. Real Test Mode/widget/webhook
+delivery still need owner-configured credentials. Refunds and manual fallback remain unimplemented
+pending approved policy/beneficiary procedure.
+
+- Implement provider-neutral local payment intents and server-side Razorpay Order creation from accepted quote snapshots.
+- Integrate Razorpay Standard Checkout in Test Mode and server-side checkout signature verification for immediate buyer feedback.
+- Implement raw-body webhook signature validation, provider event/payment deduplication, out-of-order handling, amount/currency/order correlation and API reconciliation.
+- Implement the transactional `PAID_CONFIRMED` transition, audit/outbox evidence, exactly-once print-job creation and queue UI.
+- Implement owner payment-exception/refund operations and a disabled-by-default manual-UPI fallback with MFA-protected verification.
+
+Exit gate: captured test payments enqueue exactly one job; callback-only, authorized, unsigned, replayed, unknown or mismatched events enqueue nothing; fallback claims cannot self-verify.
 
 ## Day 5: Windows bridge and AD5X spike
+
+Current status: pairing, revocation, heartbeat, expiring manifest-bound download grants and a
+Windows-compatible manual artifact client are implemented locally. Atomic printer-slot reservation,
+fresh readiness and manual start records are implemented. No printer protocol or automatic
+dispatch exists; real hardware, Windows service/protected credential storage and recovery remain pending.
 
 - Build bridge pairing, protected credential storage, heartbeat, job lease, artifact download/hash verification, local state, and normalized events.
 - Inspect actual Windows, Orca-Flashforge, AD5X firmware, LAN/WAN mode, and connectivity.
@@ -72,6 +102,12 @@ Exit gate: no buyer/API manipulation can self-verify payment or enqueue an unpai
 Exit gate: a paid test job can be traced from queue to a safe physical test or the documented fallback; duplicate start attempts do not create duplicate prints.
 
 ## Day 6: fulfillment, UX, and hardening
+
+Current status: manual printing/QA, fulfillment/tracking and disabled-by-default transactional
+email are implemented. Notification retry/dead-letter diagnostics, real loopback SMTP,
+PostgreSQL concurrency and database-only backup/restore passed. Courier integration, policy-driven
+reprints/cancellation/refunds, restricted production DB roles, real service/hardware recovery and
+production hardening remain pending. Public business/legal/support/portfolio copy remains a draft.
 
 - Implement pickup/local-delivery/shipping status, manually approved charges/tracking, and buyer timeline.
 - Complete service-led public pages and basic responsive visual system inspired directionally by the supplied reference without copying assets/content.
@@ -85,8 +121,8 @@ Exit gate: complete buyer and owner journeys pass in staging; restore and bridge
 
 - Freeze changes except launch blockers.
 - Re-run migrations, tests, dependency/security scans, configuration validation, and production smoke tests.
-- Verify TLS, domain, sender, storage privacy, backups, retention jobs, alerts, owner MFA, UPI display, and policies.
-- Train the owner on quotation, payment verification, printer readiness, failure/reprint, fulfillment, and incident handling.
+- Verify TLS, domain, sender, storage privacy, backups, retention jobs, alerts, owner MFA, Razorpay live webhook/capture/reconciliation settings, fallback controls, and policies.
+- Train the owner on quotation, payment exceptions/refunds, fallback verification, printer readiness, failure/reprint, fulfillment, and incident handling.
 - Launch with monitoring and a rollback plan.
 
 Exit gate: owner signs off the runbook and acceptance checklist; no unresolved critical/high security or physical-safety issue remains.
@@ -94,26 +130,29 @@ Exit gate: owner signs off the runbook and acceptance checklist; no unresolved c
 ## Verification strategy
 
 - Unit tests: pricing, units, state transitions, authorization predicates, token/session rotation, file checks, and bridge protocol.
-- Integration tests: database constraints, object storage, queue/outbox, email, payment verification, and migration upgrade/downgrade policy.
+- Integration tests: database constraints, object storage, queue/outbox, email, Razorpay order/webhook/reconciliation, fallback verification, and migration upgrade/downgrade policy.
 - Contract tests: OpenAPI/frontend clients and bridge/API messages.
-- End-to-end tests: buyer registration through completion, owner rejection, payment rejection, cancellation, print failure/retry, and offline bridge.
-- Security tests: cross-buyer access, role escalation, CSRF, token replay, upload abuse, UTR replay, signed-URL expiry, duplicate start, and stale bridge.
+- End-to-end tests: buyer registration through completion, owner rejection, payment success/failure/timeout, delayed webhook, cancellation/refund, print failure/retry, and offline bridge.
+- Security tests: cross-buyer access, role escalation, CSRF, token replay, upload abuse, checkout tampering, invalid/replayed webhook, provider amount mismatch, fallback UTR replay, signed-URL expiry, duplicate start, and stale bridge.
 - Hardware tests: representative single-color models, invalid artifacts, printer busy/offline, bridge restart, network loss, and duplicate command delivery.
 
 ## Launch blockers
 
+- Pinned MinIO community image no longer pulls from Docker Hub/Quay; trusted-image or maintained S3-backend approval and real object-storage verification are outstanding.
+- Unpatched high development-only `braces` advisory in the lint toolchain; runtime npm and installed Python scans are clean, but release review remains required.
+
 - Missing pricing/material/profile inputs or no approved golden quote cases.
-- No UPI beneficiary and verification procedure.
+- No approved Razorpay merchant onboarding/KYC owner, test/live credentials, webhook endpoint/secret, capture/settlement/reconciliation procedure, or fallback beneficiary/procedure.
 - No owner-approved terms/privacy/refund/prohibited-content policies.
 - No working email sender/domain or owner MFA recovery.
 - No hardware test access and no accepted manual print fallback.
-- Any path that lets a buyer self-verify payment, access another buyer's model, bypass queue authorization, or issue printer commands.
+- Any path that lets browser state, an unverified provider event or a buyer fallback claim mark payment confirmed, access another buyer's model, bypass queue authorization, or issue printer commands.
 
 ## Post-MVP order
 
-1. Razorpay Checkout and verified webhooks.
-2. Automated courier pricing, labels, tracking, and serviceability.
-3. Inventory consumption and low-stock alerts.
-4. More printers/operators with capability-aware scheduling.
-5. Customer-approved model repair and richer 3D preview.
+1. Automated courier pricing, labels, tracking, and serviceability.
+2. Inventory consumption and low-stock alerts.
+3. More printers/operators with capability-aware scheduling.
+4. Customer-approved model repair and richer 3D preview.
+5. Multi-provider payment routing, saved methods or payment links if later justified.
 6. Analytics, coupons, repeat-order tools, and visual refinement.

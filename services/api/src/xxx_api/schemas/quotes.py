@@ -1,9 +1,10 @@
 """Public quote-request and private-upload schemas."""
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field, StrictInt
 
 from xxx_api.domain.quotes import (
     AnalysisAssetStatus,
@@ -12,9 +13,11 @@ from xxx_api.domain.quotes import (
     ModelFormat,
     QuoteRequestStatus,
 )
+from xxx_api.schemas.base import UtcSchema
+from xxx_api.schemas.pricing import QuoteEstimateResponse
 
 
-class QuoteSchema(BaseModel):
+class QuoteSchema(UtcSchema):
     """Strict camelCase-compatible schema base."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -24,6 +27,15 @@ class CreateQuoteRequest(QuoteSchema):
     """Idempotent request creation input."""
 
     client_token: UUID = Field(alias="clientToken")
+    quantity: StrictInt = Field(default=1, ge=1, le=100)
+    fulfillment_mode: Literal["pickup", "local_delivery", "shipping"] = Field(
+        default="pickup", alias="fulfillmentMode"
+    )
+    buyer_notes: str | None = Field(default=None, alias="buyerNotes", max_length=1000)
+    print_preset_code: str | None = Field(
+        default=None, alias="printPresetCode", pattern=r"^[a-z0-9-]{1,32}$"
+    )
+    colour: str | None = Field(default=None, max_length=64)
 
 
 class CreateModelUploadRequest(QuoteSchema):
@@ -41,6 +53,7 @@ class PresignedUploadResponse(QuoteSchema):
     url: str
     fields: dict[str, str]
     expires_at: datetime = Field(alias="expiresAt")
+    method: Literal["POST", "PUT"] = "POST"
 
 
 class ModelAssetResponse(QuoteSchema):
@@ -82,6 +95,7 @@ class AnalysisAssetResultResponse(QuoteSchema):
     filament_mg: int | None = Field(alias="filamentMg")
     duration_seconds: int | None = Field(alias="durationSeconds")
     failure_code: str | None = Field(alias="failureCode")
+    preview_url: str | None = Field(default=None, alias="previewUrl")
 
 
 class AnalysisRunResponse(QuoteSchema):
@@ -95,6 +109,8 @@ class AnalysisRunResponse(QuoteSchema):
     slicer_name: str | None = Field(alias="slicerName")
     slicer_version: str | None = Field(alias="slicerVersion")
     profile_sha256: str | None = Field(alias="profileSha256")
+    material_code: str | None = Field(alias="materialCode")
+    print_preset_code: str | None = Field(default=None, alias="printPresetCode")
     queued_at: datetime = Field(alias="queuedAt")
     started_at: datetime | None = Field(alias="startedAt")
     completed_at: datetime | None = Field(alias="completedAt")
@@ -109,11 +125,17 @@ class QuoteRequestResponse(QuoteSchema):
     buyer_id: UUID = Field(alias="buyerId")
     status: QuoteRequestStatus
     version: int
+    quantity: int = 1
+    fulfillment_mode: str = Field(default="pickup", alias="fulfillmentMode")
+    buyer_notes: str | None = Field(default=None, alias="buyerNotes")
+    print_specification: dict[str, object] | None = Field(default=None, alias="printSpecification")
+    owner_rejection_reason: str | None = Field(default=None, alias="ownerRejectionReason")
     submitted_at: datetime | None = Field(alias="submittedAt")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
     assets: list[ModelAssetResponse]
     latest_analysis: AnalysisRunResponse | None = Field(alias="latestAnalysis")
+    latest_estimate: QuoteEstimateResponse | None = Field(alias="latestEstimate")
 
 
 class QuoteRequestListResponse(QuoteSchema):

@@ -12,24 +12,26 @@ dependencies = [
   "alembic>=1.18,<2",
   "boto3>=1.42,<2",
   "email-validator>=2.2,<3",
-  "cryptography>=44,<50",
+  "cryptography>=50.0.2,<51",
   "fastapi>=0.115,<1",
   "psycopg[binary,pool]>=3.2,<4",
   "pwdlib[argon2]>=0.3,<1",
-  "pyjwt[crypto]>=2.10,<3",
+  "pyjwt[crypto]>=2.15.1,<3",
   "pydantic-settings>=2.7,<3",
   "pyotp>=2.9,<3",
   "redis>=8,<9",
   "sqlalchemy[asyncio]>=2.0.51,<2.1",
+  # Security floor for the object-storage transport's transitive dependency.
+  "urllib3>=2.8,<3",
   "uvicorn[standard]>=0.34,<1",
 ]
 
 [project.optional-dependencies]
 dev = [
   "boto3-stubs[s3]>=1.42,<2",
-  "httpx2>=2,<3",
+  "httpx2>=2.13.1,<3",
   "mypy>=1.15,<2",
-  "pytest>=8.3,<9",
+  "pytest>=9.0.3,<10",
   "ruff>=0.9,<1",
 ]
 
@@ -42,6 +44,7 @@ packages = ["src/xxx_api"]
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers --strict-config"
 testpaths = ["tests"]
+pythonpath = ["../.."]
 
 [tool.ruff]
 target-version = "py313"

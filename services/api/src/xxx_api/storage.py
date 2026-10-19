@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 
 import boto3
 from anyio import to_thread
@@ -12,6 +12,9 @@ from botocore.client import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from xxx_api.config import Settings
+
+if TYPE_CHECKING:
+    from xxx_api.local_storage import LocalObjectStorage
 
 
 class ObjectStorageError(Exception):
@@ -29,6 +32,7 @@ class PresignedPost:
     url: str
     fields: dict[str, str]
     expires_at: datetime
+    method: Literal["POST", "PUT"] = "POST"
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +70,8 @@ class ObjectStorage(Protocol):
     ) -> int: ...
 
     async def check_ready(self) -> None: ...
+
+    async def upload_from_path(self, key: str, source: Path, *, content_type: str) -> None: ...
 
 
 class S3ObjectStorage:
@@ -165,9 +171,7 @@ class S3ObjectStorage:
                 while chunk := body.read(1024 * 1024):
                     observed += len(chunk)
                     if observed > max_bytes:
-                        raise ObjectStorageError(
-                            "private object size is outside the allowed range"
-                        )
+                        raise ObjectStorageError("private object size is outside the allowed range")
                     target.write(chunk)
             if observed != expected:
                 raise ObjectStorageError("private object length changed during download")
@@ -207,6 +211,30 @@ class S3ObjectStorage:
         except (BotoCoreError, ClientError) as error:
             raise ObjectStorageError("private object storage is not ready") from error
 
+    async def upload_from_path(self, key: str, source: Path, *, content_type: str) -> None:
+        if not source.is_file() or not 0 < source.stat().st_size <= 200 * 1024 * 1024:
+            raise ObjectStorageError("derived artifact is outside the size limit")
+        try:
+            await to_thread.run_sync(
+                partial(
+                    self._client.upload_file,
+                    str(source),
+                    self._bucket,
+                    key,
+                    ExtraArgs={"ContentType": content_type},
+                )
+            )
+        except (BotoCoreError, ClientError) as error:
+            raise ObjectStorageError("could not store derived artifact") from error
+
     def close(self) -> None:
         """Release the SDK HTTP connection pool."""
         self._client.close()
+
+
+def create_object_storage(settings: Settings) -> "S3ObjectStorage | LocalObjectStorage":
+    if settings.storage_backend == "local":
+        from xxx_api.local_storage import LocalObjectStorage
+
+        return LocalObjectStorage(settings)
+    return S3ObjectStorage(settings)

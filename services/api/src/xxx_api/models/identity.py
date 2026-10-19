@@ -96,9 +96,7 @@ class RefreshSession(UUIDPrimaryKeyMixin, Base):
     """Server-side state for one rotating refresh-token chain."""
 
     __tablename__ = "refresh_sessions"
-    __table_args__ = (
-        Index("ix_refresh_sessions_family_active", "family_id", "revoked_at"),
-    )
+    __table_args__ = (Index("ix_refresh_sessions_family_active", "family_id", "revoked_at"),)
 
     user_id: Mapped[UUID] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
@@ -192,9 +190,7 @@ class MfaRecoveryCode(UUIDPrimaryKeyMixin, Base):
     """One owner recovery code stored only as a keyed digest."""
 
     __tablename__ = "mfa_recovery_codes"
-    __table_args__ = (
-        Index("ix_mfa_recovery_codes_method_unused", "mfa_method_id", "used_at"),
-    )
+    __table_args__ = (Index("ix_mfa_recovery_codes_method_unused", "mfa_method_id", "used_at"),)
 
     mfa_method_id: Mapped[UUID] = mapped_column(
         Uuid, ForeignKey("mfa_methods.id", ondelete="CASCADE"), nullable=False

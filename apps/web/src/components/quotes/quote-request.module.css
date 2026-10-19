@@ -16,6 +16,57 @@
   gap: 8px;
 }
 
+.printOptions {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.printOptions legend {
+  padding: 0 8px;
+  font-weight: 750;
+}
+.printOptions label {
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+.printOptions p {
+  line-height: 1.6;
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+.printOptions select {
+  width: 100%;
+  min-width: 0;
+}
+
+.modelPreview {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.previewCanvas {
+  width: 100%;
+  min-height: 280px;
+  background: var(--paper);
+}
+.previewCanvas canvas {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  touch-action: none;
+}
+.modelPreview figcaption {
+  padding: 12px 16px;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
 .label {
   font-size: 0.72rem;
   font-weight: 800;
@@ -123,16 +174,20 @@
   justify-content: center;
   gap: 16px;
   border: 1px solid var(--ink);
-  background: var(--ink);
+  background: var(--orange);
   color: white;
   padding: 0 26px;
   font-size: 0.78rem;
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  box-shadow: 5px 5px 0 var(--orange);
+  border-radius: 6px;
+  box-shadow: none;
   cursor: pointer;
-  transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    opacity 160ms ease;
 }
 
 .submit:hover:not(:disabled) {
@@ -190,7 +245,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid var(--ink);
-  background: var(--ink);
+  background: var(--orange);
   color: white;
   padding: 0 26px;
   font-size: 0.78rem;
@@ -198,8 +253,11 @@
   letter-spacing: 0.1em;
   text-align: center;
   text-transform: uppercase;
-  box-shadow: 5px 5px 0 var(--orange);
-  transition: transform 160ms ease, box-shadow 160ms ease;
+  border-radius: 6px;
+  box-shadow: none;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease;
 }
 
 .submitLink:hover {
