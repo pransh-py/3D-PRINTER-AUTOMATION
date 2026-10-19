@@ -131,6 +131,9 @@ def main():
     )
     connect.add_argument("--host", required=True)
     connect.add_argument("--transport", choices=["moonraker", "flashforge"], default="moonraker")
+    commands.add_parser(
+        "native-status", help="Pair read-only native status for a Moonraker printer privately."
+    )
     mapping = commands.add_parser(
         "map", help="Map an offered colour to an observed loaded IFS slot."
     )
@@ -196,6 +199,17 @@ def main():
         print("Private station initialized. Starts disabled. Review profiles before physical use.")
         return
     config = read_config()
+    if args.command == "native-status":
+        if not config.printer or config.printer.transport != "moonraker":
+            raise ValueError("Configure the Moonraker printer first.")
+        serial = getpass.getpass("Native printer serial number (hidden): ")
+        check_code = getpass.getpass("Native LAN code (hidden): ")
+        AD5XLan(config.printer.host, serial, check_code).status()
+        config.printer.serial = SecretStr(serial)
+        config.printer.check_code = SecretStr(check_code)
+        write_config(config)
+        print("Native status paired privately. No printer control command was sent.")
+        return
     if args.command == "rates":
         config.pricing = StationPricing(
             material_rate_paise_per_gram=args.filament_per_gram,

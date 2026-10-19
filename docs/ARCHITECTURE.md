@@ -215,13 +215,24 @@ not guarantee printer/network availability or rule out actions from other printe
 For the confirmed ZMOD installation, Moonraker receives the generated single-tool G-code
 with its checksum and `print=true`. ZMOD compatibility metadata and MD5 are prepended as
 comments; SHA-256 identifies the exact dispatch artifact. Standard Moonraker does not expose
-IFS colour identity, so commissioned matching and a fresh physical operator check are required.
+IFS colour identity. Optional, privately paired native `/detail` status adds live
+slot/material/colour checks; commissioned matching and a fresh physical operator check
+are still required.
 The explicit stock adapter instead sends a sliced 3MF using FlashForge's LAN contract and
 checks its live IFS slot/material/colour. No transport is silently substituted for another.
 
-Only matching filename + live printing/heating/completed states advance the job. Completion
-does not trigger another print. No arbitrary G-code console, movement, temperatures, firmware
-changes, cloud service, payments or public printer-control endpoint are exposed. The existing
+Only an exact filename match associates live printing/completion with the job; heating
+remains awaiting start. Native active filenames take precedence over stale Moonraker
+selections. Explicit cancellation with inactive execution and heaters off ends an attempt.
+When Moonraker retains a standby selection after a native stop, the monitor requires
+native ready with no filename, inactive SD execution, zero heater targets and an empty queue.
+After a 90-second start grace period, at least three consistent observations over 12 seconds
+of monotonic time mark the attempt `stopped`. Loss of either configured connection or any
+activity resets this observation window. Matching Moonraker history can identify completion
+or cancellation explicitly; otherwise `stopped` does not claim which occurred. No terminal
+transition resends a file or starts another job. No arbitrary G-code console, movement,
+temperatures, firmware changes, cloud service, payments or public printer-control endpoint
+are exposed. The existing
 business architecture in the other sections is preserved separately, not required for local printing.
 
 The owner's October 20 LAN request adds an opt-in `run --lan-host <private IPv4>` web

@@ -17,6 +17,7 @@ from dataclasses import asdict
 from hashlib import file_digest, sha256
 from ipaddress import IPv4Address, IPv4Network
 from pathlib import Path
+from time import monotonic
 from typing import Literal, cast
 from uuid import UUID, uuid4
 
@@ -302,11 +303,22 @@ class Station:
         self.token = secrets.token_urlsafe(32)
         self.submit_lock = asyncio.Lock()
         self.tasks: set[asyncio.Task] = set()
+        self.idle_observations: dict[str, tuple[float, int]] = {}
         self.driver = driver
         if config.printer and driver is None:
             printer = config.printer
             self.driver = (
-                MoonrakerLan(printer.host, printer.api_key.get_secret_value())
+                MoonrakerLan(
+                    printer.host,
+                    printer.api_key.get_secret_value(),
+                    native=AD5XLan(
+                        printer.host,
+                        printer.serial.get_secret_value(),
+                        printer.check_code.get_secret_value(),
+                    )
+                    if printer.serial.get_secret_value() and printer.check_code.get_secret_value()
+                    else None,
+                )
                 if printer.transport == "moonraker"
                 else AD5XLan(
                     printer.host,
@@ -637,14 +649,61 @@ class Station:
                 "needs_attention",
             } or not job.get("start_intent"):
                 continue
+            same_file = status.filename == job.get("printer_filename")
+            inactive = status.is_active is False and status.heaters_active is False
+            explicit_cancel = (
+                status.job_state == "cancelled"
+                and status.state in {"ready", "cancelled"}
+                and same_file
+                and inactive
+            )
+            native_idle = (
+                status.state == "ready"
+                and status.native_state == "ready"
+                and status.native_filename == ""
+                and inactive
+                and status.job_state == "standby"
+                and status.filename in {"", job.get("printer_filename")}
+            )
+            if status.error or not native_idle:
+                self.idle_observations.pop(job["id"], None)
+            if explicit_cancel and not status.error:
+                self.journal.update(
+                    job["id"],
+                    phase="cancelled",
+                    message="Printer confirmed cancellation. No retry was sent.",
+                    termination_source="printer_cancelled",
+                )
+                continue
+            if native_idle and time.time() - job["start_intent"] > 90:
+                first_seen, count = self.idle_observations.get(job["id"], (monotonic(), 0))
+                self.idle_observations[job["id"]] = (first_seen, count + 1)
+                if monotonic() - first_seen >= 12 and count >= 2:
+                    self.journal.update(
+                        job["id"],
+                        phase="stopped",
+                        message=(
+                            "Printer is idle with no active file. This attempt was cancelled "
+                            "or did not start; no retry was sent."
+                        ),
+                        termination_source="native_idle_confirmed",
+                    )
+                    self.idle_observations.pop(job["id"], None)
+                    continue
             if status.error:
                 self.journal.update(
                     job["id"],
                     phase="needs_attention",
                     message="Printer reports an error. Inspect its screen; no retry will be sent.",
                 )
-            elif status.filename == job.get("printer_filename"):
-                if status.state in {"heating", "printing"}:
+            elif same_file:
+                if status.state == "heating":
+                    self.journal.update(
+                        job["id"],
+                        phase="awaiting_start",
+                        message="AD5X is heating/preparing this job; waiting for printing.",
+                    )
+                elif status.state == "printing":
                     self.journal.update(
                         job["id"],
                         phase="printing",
@@ -670,6 +729,15 @@ class Station:
                         phase="needs_attention",
                         message="Job is paused, cancelled or in error. Inspect the printer.",
                     )
+                elif time.time() - job["start_intent"] > 90 and status.state not in {
+                    "busy",
+                    "heating",
+                }:
+                    self.journal.update(
+                        job["id"],
+                        phase="needs_attention",
+                        message="Checking for cancellation. No print confirmed or retried.",
+                    )
             elif time.time() - job["start_intent"] > 90:
                 self.journal.update(
                     job["id"],
@@ -683,6 +751,7 @@ class Station:
                 try:
                     self.reconcile(await asyncio.to_thread(self.driver.status))
                 except PrinterError:
+                    self.idle_observations.clear()
                     for job in self.journal.all():
                         if job["phase"] in {"awaiting_start", "printing"}:
                             self.journal.update(
@@ -764,6 +833,7 @@ def create_app(
                 printer_status = asdict(current)
                 printer_message = "Connected to AD5X."
             except PrinterError as error:
+                station.idle_observations.clear()
                 printer_message = str(error)
         profiles = {}
         for material in STOCK:

@@ -36,6 +36,11 @@ class PrinterStatus:
     progress: float
     error: bool
     slots: tuple[Slot, ...]
+    job_state: str | None = None
+    is_active: bool | None = None
+    heaters_active: bool | None = None
+    native_state: str | None = None
+    native_filename: str | None = None
 
 
 @dataclass(frozen=True)
@@ -93,7 +98,9 @@ class AD5XLan:
                 raise PrinterError("The printer status is missing.")
             raw_pid = detail.get("pid")
             pid = int(raw_pid, 16) if isinstance(raw_pid, str) else raw_pid
-            if type(pid) is not int or pid != 0x38:
+            # Native AD5X firmware 3.1.6 reports numeric 38 and name AD5X.
+            native_ad5x = type(raw_pid) is int and raw_pid == 38 and detail.get("name") == "AD5X"
+            if not native_ad5x and (type(pid) is not int or pid != 0x38):
                 raise PrinterError("This device has not identified itself as an AD5X.")
             slots = []
             station = detail.get("matlStationInfo", {})

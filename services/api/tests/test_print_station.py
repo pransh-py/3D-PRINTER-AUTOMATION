@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import threading
+import time
 from contextlib import contextmanager
 from hashlib import md5, sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -61,7 +62,11 @@ def simulated_printer(*, moonraker=False, ambiguous=False):
 
         def do_GET(self):
             if self.path == "/server/job_queue/status":
-                self.reply({"result": {"queue_state": "paused", "queued_jobs": []}})
+                self.reply(
+                    {"result": {"queue_state": "paused", "queued_jobs": detail.get("_queue", [])}}
+                )
+            elif self.path.startswith("/server/history/list"):
+                self.reply({"result": {"jobs": detail.get("_history", [])}})
             else:
                 self.reply({"result": {"state": "ready", "software_version": "SIMULATOR"}})
 
@@ -74,11 +79,16 @@ def simulated_printer(*, moonraker=False, ambiguous=False):
                 self.reply(
                     {
                         "result": {
-                            "status": {
-                                "print_stats": {"state": "standby", "filename": ""},
-                                "virtual_sdcard": {"progress": 0, "is_active": False},
-                                "idle_timeout": {"state": "Ready"},
-                            }
+                            "status": detail.get(
+                                "_moonraker",
+                                {
+                                    "print_stats": {"state": "standby", "filename": ""},
+                                    "virtual_sdcard": {"progress": 0, "is_active": False},
+                                    "idle_timeout": {"state": "Ready"},
+                                    "extruder": {"target": 0},
+                                    "heater_bed": {"target": 0},
+                                },
+                            )
                         }
                     }
                 )
@@ -450,6 +460,184 @@ def test_estimate_then_print_reuses_accepted_bytes_and_price_once(
             else:
                 assert not uploads
                 assert not job.get("start_intent")
+
+
+@pytest.mark.parametrize(
+    "scenario,expected_phase",
+    [
+        ("native_idle", "stopped"),
+        ("cleared_moonraker_file", "stopped"),
+        ("explicit_cancel", "cancelled"),
+        ("history_cancel", "cancelled"),
+        ("history_complete", "completed"),
+        ("heating", None),
+        ("executing", None),
+        ("paused", None),
+        ("native_busy", None),
+        ("native_cancel", None),
+        ("native_canceling", None),
+        ("native_canceling_after_cancelled", None),
+        ("native_printing_after_cancelled", None),
+        ("native_error_state", None),
+        ("native_paused", None),
+        ("native_printing_other_file", None),
+        ("native_printing_no_file", None),
+        ("native_other_file", None),
+        ("other_moonraker_file", None),
+        ("native_error", None),
+        ("queued", None),
+        ("unpaired", None),
+        ("initial_delay", None),
+        ("reset_observations", "stopped"),
+        ("disconnect_reset", "stopped"),
+    ],
+)
+def test_automatic_terminal_detection_requires_consistent_inactive_printer_evidence(
+    tmp_path, monkeypatch, scenario, expected_phase
+):
+    clock = [time.time()]
+    monkeypatch.setattr("services.bridge.print_station.time.time", lambda: clock[0])
+    monkeypatch.setattr("services.bridge.print_station.monotonic", lambda: clock[0])
+    with simulated_printer(moonraker=True) as (port, events, detail):
+        detail.update(pid=38, name="AD5X", printFileName="")
+        native = AD5XLan(
+            "127.0.0.1", "simulation", "simulation", port=port, allow_loopback_test=True
+        )
+        driver = MoonrakerLan(
+            "127.0.0.1",
+            port=port,
+            allow_loopback_test=True,
+            native=None if scenario == "unpaired" else native,
+        )
+        config = configuration(tmp_path)
+        app = create_app(config, tmp_path / "jobs", enable_printer=True, driver=driver)
+        with TestClient(app, base_url="http://127.0.0.1:8123") as client:
+            station = app.state.station
+            job, _ = station.journal.create(options())
+            filename = f"pf_{job['id']}_{'b' * 12}.gcode"
+            station.journal.update(
+                job["id"],
+                phase="awaiting_start",
+                start_intent=clock[0] - 120,
+                printer_filename=filename,
+            )
+            if scenario == "initial_delay":
+                station.journal.update(job["id"], start_intent=clock[0] - 30)
+            detail["_moonraker"] = {
+                "print_stats": {"state": "standby", "filename": filename},
+                "virtual_sdcard": {"is_active": False, "progress": 0},
+                "idle_timeout": {"state": "Ready"},
+                "extruder": {"target": 0},
+                "heater_bed": {"target": 0},
+            }
+            moon = detail["_moonraker"]
+            if scenario == "cleared_moonraker_file":
+                moon["print_stats"]["filename"] = ""
+            elif scenario == "explicit_cancel":
+                moon["print_stats"]["state"] = "cancelled"
+            elif scenario in {"history_cancel", "history_complete"}:
+                detail["_history"] = [
+                    {
+                        "filename": filename,
+                        "status": "cancelled" if scenario == "history_cancel" else "completed",
+                    }
+                ]
+            elif scenario == "heating":
+                moon["heater_bed"]["target"] = 55
+            elif scenario == "executing":
+                moon["virtual_sdcard"]["is_active"] = True
+            elif scenario == "paused":
+                moon["print_stats"]["state"] = "paused"
+            elif scenario == "native_busy":
+                detail["status"] = "busy"
+            elif scenario in {"native_cancel", "native_canceling", "native_paused"}:
+                detail["status"] = {
+                    "native_cancel": "cancel",
+                    "native_canceling": "canceling",
+                    "native_paused": "pause",
+                }[scenario]
+            elif scenario in {"native_printing_other_file", "native_printing_no_file"}:
+                detail["status"] = "printing"
+                if scenario == "native_printing_other_file":
+                    detail["printFileName"] = "external-job.gcode"
+            elif scenario in {
+                "native_canceling_after_cancelled",
+                "native_printing_after_cancelled",
+            }:
+                moon["print_stats"]["state"] = "cancelled"
+                detail["status"] = (
+                    "canceling" if scenario == "native_canceling_after_cancelled" else "printing"
+                )
+                detail["printFileName"] = filename
+            elif scenario == "native_error_state":
+                moon["print_stats"]["state"] = "cancelled"
+                detail["status"] = "error"
+            elif scenario == "native_other_file":
+                detail["printFileName"] = "external-job.gcode"
+            elif scenario == "other_moonraker_file":
+                moon["print_stats"]["filename"] = "external-job.gcode"
+            elif scenario == "native_error":
+                detail["errorCode"] = "SIMULATED_ERROR"
+            elif scenario == "queued":
+                detail["_queue"] = [{"filename": "external-job.gcode"}]
+
+            client.get("/api/printer/status")
+            clock[0] += 6
+            client.get("/api/printer/status")
+            if scenario not in {"explicit_cancel", "history_cancel", "history_complete"}:
+                assert station.journal.get(job["id"])["phase"] not in {
+                    "stopped",
+                    "cancelled",
+                    "completed",
+                }
+            if scenario in {"reset_observations", "disconnect_reset"}:
+                if scenario == "reset_observations":
+                    moon["heater_bed"]["target"] = 55
+                    client.get("/api/printer/status")
+                    moon["heater_bed"]["target"] = 0
+                else:
+
+                    def disconnected(self):
+                        raise PrinterError("SIMULATED native disconnect")
+
+                    with monkeypatch.context() as connection_patch:
+                        connection_patch.setattr(AD5XLan, "status", disconnected)
+                        assert client.get("/api/printer/status").json()["printer"] is None
+                assert not station.idle_observations
+                clock[0] += 20
+                client.get("/api/printer/status")
+                assert station.journal.get(job["id"])["phase"] != "stopped"
+            clock[0] += 13
+            client.get("/api/printer/status")
+            client.get("/api/printer/status")
+            result = station.journal.get(job["id"])
+            if expected_phase:
+                assert result["phase"] == expected_phase, result
+                station.journal.create(options())  # The terminal job releases the active-job lock.
+            else:
+                assert result["phase"] not in {"stopped", "cancelled", "completed"}, result
+                if scenario in {"native_printing_other_file", "native_printing_no_file"}:
+                    assert result["phase"] != "printing", result
+                with pytest.raises(Exception, match="current job"):
+                    station.journal.create(options())
+            assert not any(event[0] in {"/server/files/upload", "/uploadGcode"} for event in events)
+
+
+def test_native_numeric_ad5x_identity_and_live_spool_verification():
+    with simulated_printer(moonraker=True) as (port, _, detail):
+        detail.update(pid=38, name="AD5X", printFileName="")
+        native = AD5XLan(
+            "127.0.0.1", "simulation", "simulation", port=port, allow_loopback_test=True
+        )
+        driver = MoonrakerLan("127.0.0.1", port=port, allow_loopback_test=True, native=native)
+        status = driver.status()
+        assert status.model_pid == 38 and status.native_state == "ready"
+        assert driver.require_ready(status, slot=1, material="PLA", colour_hex="#FF0000")
+        with pytest.raises(PrinterError, match="IFS slot"):
+            driver.require_ready(status, slot=3, material="PLA", colour_hex="#FF0000")
+        detail["name"] = "OTHER_MODEL"
+        with pytest.raises(PrinterError, match="AD5X"):
+            native.status()
 
 
 def test_physical_start_disabled_and_unconfirmed_colours_rejected(tmp_path):

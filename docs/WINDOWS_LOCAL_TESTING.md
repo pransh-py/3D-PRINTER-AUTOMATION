@@ -218,12 +218,12 @@ No second physical print was sent. A fresh bed-clear confirmation is required fo
 A subsequent owner-authorized coaster submission reached the ordinary website API, sliced
 successfully and uploaded once. The native printer rejected its start as `Printer is Busy`.
 Moonraker still returned upload/start acceptance because the ZMOD macro reported that native
-error through console output. The current adapter does not parse this diagnostic; a matching
-selected filename in standby can therefore leave the activity at `awaiting_start`.
+error through console output. The adapter at the time did not parse this diagnostic; a
+matching selected filename in standby could leave the activity at `awaiting_start`.
 
 Read-only checks confirmed zero file progress, zero filament use, inactive SD execution and
 an empty queue. The explicitly rejected activity was marked failed locally to unblock the
-form. No retry or second physical print was sent. Native-start error detection remains an
+form. No retry or second physical print was sent. Native-start error detection was an
 open integration issue; upload acceptance alone must not be treated as proof of printing.
 The owner then requested that further print submissions be made personally through the UI.
 
@@ -297,7 +297,7 @@ Downloads of an existing cube's files through the LAN proxy also returned 200 an
 the stored hashes. Evidence is in ignored `.local/preview/customer-demo-*.json`.
 These checks submitted no job to the live website or printer. Browser click-through and
 a new physical print are left to the owner's website test; the saved browser denial
-was respected. The known native busy response above remains an integration limitation.
+was respected. Automatic detection of stopped attempts is documented below.
 
 The estimate-first update passed 53 station tests, including checks for mismatched
 prices, changed files/profiles/plate/mapping, disabled or unapproved printing, active-job
@@ -306,3 +306,40 @@ and a loopback printer simulator: two 0.10 mm cubes produced 8.10 g and 1,898 se
 No upload occurred before price acceptance; exactly one G-code upload followed, preserving
 the quoted file hashes and estimate. This used a disposable journal and simulated driver,
 never the physical printer or live website's submission API.
+
+## Automatic stop detection — October 20
+
+The monitor now reads both Moonraker and the privately paired native FlashForge `/detail`
+endpoint. The native API identifies this AD5X with numeric PID 38 and firmware `3.1.6-1.1.1`.
+This adds status and live spool verification; printing still uses the commissioned
+Moonraker transport and the original reviewed profiles.
+
+An exact-file Moonraker cancellation with inactive execution and heater targets off becomes
+`cancelled`. If the native screen has instead cleared the file while Moonraker retains a
+standby selection, the app waits until the start is older than 90 seconds and observes
+native ready/empty filename, inactive SD execution, zero heater targets and no queued work
+consistently for at least 12 seconds. That attempt becomes `stopped`, releasing the active
+job lock without a manual journal edit. Matching history may identify a successful finish
+or cancellation more precisely. The native `cancel`/`canceling` transition is busy, not
+terminal; a pause, heating, another file or loss of either connection resets the observation
+window. Nothing is automatically resent or started.
+
+The website already polls every three seconds, so status changes appear automatically.
+See the protocol references for [native states](https://github.com/Parallel-7/flashforge-api-docs/wiki/State-Machines)
+and [Moonraker job objects](https://moonraker.readthedocs.io/en/latest/printer_objects/).
+
+The configured owner-profile coaster was also sliced in an isolated journal with no usable
+printer driver: PLA red, 0.20 mm, 20% infill, supports off, one copy. Orca reported 30.85 g
+and 5,289 seconds; the configured rates yield **INR 107.25**. Both artifact hashes were
+verified. These checks do not submit a live print; the owner starts it through the website.
+
+Deployment verification observed the existing `large.stl` attempt change automatically
+from `awaiting_start` to `stopped` with `termination_source=native_idle_confirmed`. No
+manual journal update, new model submission or physical start was performed. The number
+of jobs and recorded start intents stayed unchanged, and the old estimate was preserved.
+Native and Moonraker status both report ready, with red PLA loaded in slot 3, inactive
+execution, zero heater targets and no active station job. Both localhost and LAN `/print`
+and proxied status URLs returned HTTP 200. Browser click-through remains unverified because
+the saved origin denial was respected. Station tests passed **79 cases**, with one opt-in
+real-Orca case skipped; configured Python lint and formatting checks passed. Sanitized
+deployment evidence is in ignored `.local/preview/coaster-cancel-detection-verification.json`.

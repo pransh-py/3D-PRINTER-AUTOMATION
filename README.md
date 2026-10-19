@@ -43,10 +43,12 @@ is enabled on the configured installation; PETG remains slicing-only pending pro
 The active PLA profiles were resolved from the owner's Orca M1 bundle. New clones do not
 include private printer credentials, profile exports, uploaded models or the job journal.
 
-**Known issue:** a native ZMOD `Printer is Busy` rejection can leave activity at
-`awaiting_start`, because Moonraker may acknowledge the upload before the native start
-fails. Upload acceptance is not proof that the printer started. Inspect the printer before
-any retry; see [the observed failure](docs/WINDOWS_LOCAL_TESTING.md#known-native-busy-response--october-20).
+The monitor combines Moonraker with privately paired native FlashForge status. It detects
+explicit cancellations and marks an abandoned attempt **Stopped** once both sources
+consistently show no execution, no active native file and both heater targets off.
+Heating, paused jobs and unavailable status keep new starts blocked. Upload acceptance
+alone is not proof of printing, and the monitor never resends a job. See
+[automatic status detection](docs/WINDOWS_LOCAL_TESTING.md#automatic-stop-detection--october-20).
 
 ## Run on the LAN
 

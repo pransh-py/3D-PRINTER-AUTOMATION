@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from hashlib import file_digest
 from http.client import HTTPConnection, HTTPException
 from json import dumps, loads
+from math import isfinite
 from pathlib import Path
 from re import fullmatch
 from uuid import uuid4
@@ -22,6 +23,7 @@ class MoonrakerLan:
     port: int = 7125
     timeout: float = 20
     allow_loopback_test: bool = False
+    native: AD5XLan | None = field(default=None, repr=False)
 
     def __post_init__(self):
         # Reuse the numeric private-LAN boundary; neither DNS nor redirects are used.
@@ -79,6 +81,8 @@ class MoonrakerLan:
                             "print_stats": ["state", "filename"],
                             "virtual_sdcard": ["progress", "is_active"],
                             "idle_timeout": ["state"],
+                            "extruder": ["target"],
+                            "heater_bed": ["target"],
                         }
                     }
                 ),
@@ -90,6 +94,15 @@ class MoonrakerLan:
             )
             state, filename = stats["state"], stats["filename"]
             progress = sd["progress"]
+            targets = [objects.get(name, {}).get("target") for name in ("extruder", "heater_bed")]
+            heaters_active = (
+                any(value > 0 for value in targets)
+                if all(
+                    type(value) in {int, float} and isfinite(value) and value >= 0
+                    for value in targets
+                )
+                else None
+            )
             if (
                 not isinstance(state, str)
                 or not isinstance(filename, str)
@@ -117,14 +130,60 @@ class MoonrakerLan:
                 normalized = "completed" if state == "complete" else "ready"
             elif state in {"complete", "cancelled", "standby"}:
                 normalized = "busy"
+            native = self.native.status() if self.native else None
+            if native:
+                if native.error or native.state == "error":
+                    raise PrinterError(
+                        "Native printer reports an error. No new print will be sent."
+                    )
+                if native.state not in {"ready", "completed", "cancelled"}:
+                    normalized = {
+                        "printing": "printing",
+                        "pause": "paused",
+                        "paused": "paused",
+                        "heating": "heating",
+                    }.get(native.state, "busy")
+                    # The native engine may run a different file while Moonraker
+                    # retains the old selection. Never attribute that activity to it.
+                    if normalized in {"printing", "paused", "heating"}:
+                        if native.filename:
+                            filename, progress = native.filename, native.progress
+                        elif state not in {"printing", "paused"}:
+                            normalized = "busy"
+                if heaters_active is None:
+                    raise PrinterError("Heater status unavailable. No new print will be sent.")
+            if normalized in {"ready", "completed"} and heaters_active:
+                normalized = "heating"
+            if (
+                native
+                and native.state == "ready"
+                and not native.filename
+                and sd["is_active"] is False
+                and heaters_active is False
+                and state == "standby"
+                and filename
+            ):
+                connection.request(
+                    "GET", "/server/history/list?limit=10&order=desc", headers=self.headers
+                )
+                history = self.result(connection).get("jobs", [])
+                matching = next((job for job in history if job.get("filename") == filename), None)
+                if matching and matching.get("status") in {"completed", "cancelled"}:
+                    state = "complete" if matching["status"] == "completed" else "cancelled"
+                    normalized = "completed" if state == "complete" else "ready"
             return PrinterStatus(
                 normalized,
-                0,
-                str(info.get("software_version", ""))[:128],
+                native.model_pid if native else 0,
+                native.firmware if native else str(info.get("software_version", ""))[:128],
                 filename,
                 float(progress),
                 state == "error",
-                (),
+                native.slots if native else (),
+                job_state=state,
+                is_active=sd["is_active"],
+                heaters_active=heaters_active,
+                native_state=native.state if native else None,
+                native_filename=native.filename if native else None,
             )
         except (
             OSError,
@@ -144,6 +203,17 @@ class MoonrakerLan:
     def require_ready(status, *, slot, material, colour_hex):
         if status.state not in {"ready", "completed"} or status.error:
             raise PrinterError("ZMOD printer is not idle and error-free. No print was sent.")
+        if status.native_state is not None:
+            match = next((item for item in status.slots if item.number == slot), None)
+            if (
+                not match
+                or not match.loaded
+                or match.material != material.upper()
+                or match.colour_hex != colour_hex.upper()
+            ):
+                raise PrinterError(
+                    "The selected IFS slot is not loaded with the configured material/colour."
+                )
         # These are commissioned values AND a fresh operator attestation, not
         # purported live IFS sensor readings. Standard Moonraker has no colour sensor.
         return Slot(slot, material, colour_hex, True)

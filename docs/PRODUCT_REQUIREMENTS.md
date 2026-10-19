@@ -315,6 +315,17 @@ and dispatches those same prepared bytes once. It does not re-upload or re-slice
 model or recalculate an accepted price. Conflicting starts, stale preparation, changed
 artifacts and unapproved profiles are rejected; ambiguous dispatch is never resent.
 
+Cancellation/stopped-job detection is automatic. Preserve Moonraker's raw job state,
+SD execution and heater targets, and optionally read the paired native FlashForge status
+on the existing LAN address. Native credentials stay in the private station configuration.
+An explicit cancellation with inactive execution and heaters off is terminal. For the
+native-screen case that leaves Moonraker in standby, require native ready with no file,
+an empty queue, inactive execution, heaters off, a start older than 90 seconds and at
+least 12 seconds of consistent observations. Mark that attempt stopped (not completed),
+unless matching Moonraker history supplies an explicit completion/cancellation. No resend
+or next automatic print follows. Heating, motion, paused jobs, uncertain status or loss
+of either configured connection must never be treated as a cancelled/finished job.
+
 ### October 19 delivery correction
 
 #### Robu-style standalone configurator (afternoon correction)

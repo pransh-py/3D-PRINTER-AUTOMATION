@@ -283,3 +283,21 @@ an unapproved PETG print returned 409. Neither created a job or sent a printer c
 Both heater targets were zero and the printer was idle. Sanitized verification is in ignored
 `.local/preview/printing-enabled-verification.json`. Browser click-through verification
 remains unavailable because of the saved origin permission denial; this test did not change it.
+
+## Pair native status for automatic stop detection
+
+For the commissioned Moonraker connection, native status can be added without changing
+the print transport. Stop the station when no print is executing or preparing, then run:
+
+```powershell
+wsl.exe -d Ubuntu --exec /home/praanesh_mb/.local/share/printflow-runtime/venv/bin/python tools/run_print_station.py --directory /home/praanesh_mb/.local/share/printflow-runtime/station native-status
+```
+
+Enter the printer's serial number and native LAN code at the hidden prompts. The command
+checks `/detail` on port 8898 and stores the pair only in the existing private configuration;
+do not put credentials in command arguments or Git. Restart the backend with its usual LAN
+and printing options. Native status is now paired on this installation. The app detects
+stopped attempts automatically using [both status sources](WINDOWS_LOCAL_TESTING.md#automatic-stop-detection--october-20),
+checks loaded IFS material/colour again before a start, and never automatically retries.
+This status check does not verify that the bed is physically clear; the operator still
+confirms readiness when choosing **Print for INR …**.
