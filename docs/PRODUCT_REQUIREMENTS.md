@@ -300,6 +300,11 @@ only after choosing the action that starts a print. Cancelling sends no upload o
 slicing for an estimate requires no operator confirmation. The backend readiness
 attestation and commissioned-profile checks remain enforced.
 
+The buyer view shows the estimated total rather than the owner's filament/hourly rates
+or separate material/machine charges. It also omits the printer-start capability banner
+and internal single-plate/back-to-back-print explanation. Pricing calculations, quantity
+validation and operator confirmation at print start continue to apply.
+
 ### October 19 delivery correction
 
 #### Robu-style standalone configurator (afternoon correction)

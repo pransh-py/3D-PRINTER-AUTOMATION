@@ -9,8 +9,9 @@ The local print station requires no account, cart, payment service, Docker, Post
 - STL/OBJ uploads with a 3D preview, millimetres/inches and X/Y rotation.
 - PLA/PETG selections, 0.1/0.15/0.2 mm layers, infill, supports and 1–10 copies on one plate.
 - Real OrcaSlicer filament/time measurements and downloadable G-code and sliced 3MF files.
-- Estimates at the owner's confirmed **INR 3/g filament + INR 10/hour printing**, shown
-  separately and saved with the rates used. These exclude additional services, tax and delivery.
+- Estimates at the owner's confirmed **INR 3/g filament + INR 10/hour printing**, saved
+  with the rates used. The buyer sees the estimated total. These exclude additional
+  services, tax and delivery.
 - Persistent job activity, one active job at a time, and explicit readiness confirmation
   before each physical print. A downloaded or sliced file does not start printing by itself.
 - Optional access from other trusted devices on the same LAN.

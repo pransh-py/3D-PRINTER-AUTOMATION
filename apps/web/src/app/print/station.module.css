@@ -588,25 +588,19 @@
   color: var(--muted);
   font-size: 12px;
 }
-.costBreakdown {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20px 32px;
+.estimate {
   margin: 18px 0 8px;
   padding-top: 16px;
   border-top: 1px solid var(--line);
 }
-.costBreakdown dt {
+.estimate dt {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
 }
-.costBreakdown dd {
+.estimate dd {
   margin: 5px 0 0;
-  font-size: 16px;
   font-variant-numeric: tabular-nums;
-}
-.costTotal dd {
   font-size: 20px;
   font-weight: 600;
 }

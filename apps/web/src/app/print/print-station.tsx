@@ -24,9 +24,6 @@ type RateCard = {
 };
 type SliceEstimate = {
   currency: "INR";
-  rates: RateCard;
-  material_paise: number;
-  machine_paise: number;
   total_paise: number;
 };
 const rupees = new Intl.NumberFormat("en-IN", {
@@ -683,15 +680,6 @@ export default function PrintStation({
                             }}
                           />
                         </label>
-                        <p className={styles.hint}>
-                          Copies are arranged on a single plate. Multiple plates
-                          and automatic back-to-back prints are not supported.
-                        </p>
-                        <p className={styles.notice}>
-                          {physical
-                            ? "Printer starts enabled. This action can heat and move the printer."
-                            : "Slicing-only mode. No printer commands will be sent."}
-                        </p>
                         <button
                           type="button"
                           className={styles.primary}
@@ -781,13 +769,6 @@ export default function PrintStation({
             <h2>Estimates & print activity</h2>
             <span>Saved on this computer</span>
           </div>
-          {station?.pricing && (
-            <p className={styles.hint}>
-              Current rates: {money(station.pricing.material_rate_paise_per_gram)}/g
-              {" "}of filament + {money(station.pricing.machine_rate_paise_per_hour)}/hour
-              {" "}of printing. Prices use the sliced filament and time for your full quantity.
-            </p>
-          )}
           {!latest ? (
             <div className={styles.emptyActivity}>
               <UiIcon name="layers" />
@@ -832,16 +813,8 @@ export default function PrintStation({
                   </small>
                   {job.estimate && (
                     <>
-                      <dl className={styles.costBreakdown}>
+                      <dl className={styles.estimate}>
                         <div>
-                          <dt>Filament · {money(job.estimate.rates.material_rate_paise_per_gram)}/g</dt>
-                          <dd>{money(job.estimate.material_paise)}</dd>
-                        </div>
-                        <div>
-                          <dt>Printing · {money(job.estimate.rates.machine_rate_paise_per_hour)}/hr</dt>
-                          <dd>{money(job.estimate.machine_paise)}</dd>
-                        </div>
-                        <div className={styles.costTotal}>
                           <dt>Estimated total</dt>
                           <dd>{money(job.estimate.total_paise)}</dd>
                         </div>
