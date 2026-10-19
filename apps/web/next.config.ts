@@ -6,11 +6,13 @@ const apiInternalUrl = (
 
 const nextConfig: NextConfig = {
   distDir:
-    process.env.PRINTFLOW_PRINT_STATION === "1"
-      ? ".next-print-station"
-      : process.env.PRINTFLOW_WEB_VERIFICATION === "1"
-        ? ".next-verification"
-        : ".next",
+    process.env.PRINTFLOW_LAN_WEB === "1"
+      ? ".next-lan"
+      : process.env.PRINTFLOW_PRINT_STATION === "1"
+        ? ".next-print-station"
+        : process.env.PRINTFLOW_WEB_VERIFICATION === "1"
+          ? ".next-verification"
+          : ".next",
   experimental: {
     proxyClientMaxBodySize: "101mb",
   },

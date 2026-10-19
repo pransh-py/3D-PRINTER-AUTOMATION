@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SiteHeader } from "@/components/site-header";
 import { UiIcon } from "@/components/ui-icon";
+import { sha256Hex, submissionId } from "@/lib/client-crypto";
 import {
   DEFAULT_MODEL_OPTIONS,
   swatchColour,
@@ -189,10 +190,7 @@ export default function PrintStation({
     setMessage("Checking model integrity and uploading…");
     try {
       const bytes = await file.arrayBuffer();
-      const digest = Array.from(
-        new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
-        (value) => value.toString(16).padStart(2, "0"),
-      ).join("");
+      const digest = await sha256Hex(bytes);
       const base = {
         filename: file.name,
         size: file.size,
@@ -210,7 +208,7 @@ export default function PrintStation({
       const fingerprint = JSON.stringify(base);
       if (!submission.current || submission.current.payload !== fingerprint)
         submission.current = {
-          token: crypto.randomUUID(),
+          token: submissionId(),
           payload: fingerprint,
         };
       const optionsHeader = JSON.stringify({

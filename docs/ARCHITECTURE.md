@@ -224,6 +224,14 @@ does not trigger another print. No arbitrary G-code console, movement, temperatu
 changes, cloud service, payments or public printer-control endpoint are exposed. The existing
 business architecture in the other sections is preserved separately, not required for local printing.
 
+The owner's October 20 LAN request adds an opt-in `run --lan-host <private IPv4>` web
+binding and exact Host/Origin allowlist entry. The API still binds only loopback and
+disregards forwarded client headers. LAN devices use relative `/api/printer` requests
+through Next, with the same submission token and physical-start gates. The frontend
+uses a SHA-256 fallback and cryptographically random UUIDs when the LAN's HTTP origin
+does not provide secure-context Web Crypto methods. This shares the operator station
+with trusted LAN devices; it does not implement internet hosting or customer accounts.
+
 The local station also supports an optional private material/time rate card. After actual
 slicing, pricing-v1 uses integer milligrams, seconds and paise to store an INR estimate
 snapshot with its exact rates and measured plate totals. The upload API cannot supply price

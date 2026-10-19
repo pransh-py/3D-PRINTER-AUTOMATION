@@ -226,3 +226,48 @@ an empty queue. The explicitly rejected activity was marked failed locally to un
 form. No retry or second physical print was sent. Native-start error detection remains an
 open integration issue; upload acceptance alone must not be treated as proof of printing.
 The owner then requested that further print submissions be made personally through the UI.
+
+## Trusted LAN website — October 20
+
+The current PC's Wi-Fi address is `192.168.100.5`. Devices on the same trusted LAN can
+open **http://192.168.100.5:3100/print** while this PC and both services are running.
+The existing localhost website stays available. The LAN process binds only that Wi-Fi
+address; the WSL backend still listens on `127.0.0.1:8123`. Existing enabled Node.js
+Windows firewall rules permit inbound traffic. No router port forwarding was added.
+If DHCP changes the PC address, restart both services with its new private IPv4 address.
+
+To reproduce this setup, stop the station backend only when it has no active job.
+From the repository root in a dedicated PowerShell terminal:
+
+```powershell
+wsl.exe -d Ubuntu --exec bash -lc 'exec "$HOME/.local/share/printflow-runtime/venv/bin/python" -u tools/run_print_station.py --directory "$HOME/.local/share/printflow-runtime/station" run --api-only --enable-printer --lan-host 192.168.100.5'
+```
+
+For the separate LAN frontend, use another terminal. Build before starting it; stop a
+running LAN frontend before rebuilding its directory. The separate `.next-lan` output
+keeps the existing localhost build intact:
+
+```powershell
+Set-Location apps/web
+$env:PRINTFLOW_PRINT_STATION = '1'
+$env:PRINTFLOW_LAN_WEB = '1'
+npm run build
+npm run start -- --hostname 192.168.100.5 --port 3100
+```
+
+`--lan-host` is an explicit runtime allowlist option, not a change to profile, printer
+or rate configuration. Omit `--enable-printer` for slicing only. On a Linux installation,
+the launcher can also start the frontend itself; optimized LAN mode needs a build made
+with both frontend variables above. LAN access shares the existing operator controls
+and job history with trusted devices; this station has no separate LAN user accounts.
+
+The upload client uses native Web Crypto where available and a pinned SHA-256 fallback
+for plain HTTP LAN origins. Upload IDs use secure random UUIDs in either case. Verification
+passed 46 frontend tests, 40 focused station tests (one real-Orca test skipped), TypeScript,
+targeted ESLint, configured Ruff checks and the optimized LAN build. HTTP GET checks on
+both the LAN and localhost addresses returned 200 for `/print` and the proxied printer
+status, with starts enabled, PLA approved, the printer ready and no active station jobs.
+The same private journal remains in use. Evidence is in ignored
+`.local/preview/lan-host-verification.json`. No print was submitted for these checks.
+An independent-device network check and browser interaction remain unverified; the
+previously saved browser-origin denial was respected.

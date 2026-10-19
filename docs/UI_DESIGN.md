@@ -6,7 +6,7 @@ the later Windows/WSL and physical-printer work recorded in
 
 ## Direction and references
 
-The redesign uses the [Taste frontend skill](https://github.com/Leonxlnx/taste-skill/tree/main/skills/taste-skill), read from an ignored checkout at `.local/taste-skill`. It keeps Next.js, CSS modules, the bundled Geist font, and the existing printing and business services.
+The redesign keeps Next.js, CSS modules, the bundled Geist font, and the existing printing and business services. Design tooling is not required to build or run the application.
 
 References studied:
 
@@ -17,7 +17,7 @@ References studied:
 
 These inform the information hierarchy. No competitor copy, photographs, testimonials, logos, prices, lead times or certifications were copied.
 
-Taste dealt three page directions. Selected **The sentence is the layout**, seed **43990036**, because a tangible printed part can sit inside the sentence “Your file. Made real.” The inline bracket and large orange knot make the file-to-object transition visible. The sheet is `.local/design/taste/direction.json`. The printing screen uses **Framed sheet**, seed **1688501930**, with an inset working surface, quiet controls and a model canvas. Its sheet is `.local/design/app/direction.json`. No redraws were requested. Existing orange and neutral brand colours were refined, and Geist was retained.
+The homepage direction is **The sentence is the layout**, seed **43990036**, because a tangible printed part can sit inside the sentence “Your file. Made real.” The inline bracket and large orange knot make the file-to-object transition visible. The original direction sheet is `.local/design/taste/direction.json`. The printing screen uses **Framed sheet**, seed **1688501930**, with an inset working surface, quiet controls and a model canvas. Its sheet is `.local/design/app/direction.json`. Existing orange and neutral brand colours were refined, and Geist was retained.
 
 The live element is the material explorer: choose PLA or PETG and a confirmed colour, then carry those selections into `/print`. Only valid material/colour combinations are accepted from the URL. This does not commission a profile or authorize printing.
 
@@ -60,7 +60,7 @@ No external stock photographs or video were imported for these generated assets.
 
 ## Verification and visual review boundary
 
-The initial page was inspected with Taste at 1440, 768 and 390 px; its measurements and screenshots are in `.local/design/before`. An intermediate redesigned page was also captured at all three widths under `.local/design/after`, before browser access was blocked. Its measured hero occupied two lines at every width, used the loaded Geist font, and had no horizontal overflow or broken images. It contained five image elements using four distinct assets.
+The initial page was inspected at 1440, 768 and 390 px; its measurements and screenshots are in `.local/design/before`. An intermediate redesigned page was also captured at all three widths under `.local/design/after`, before browser access was blocked. Its measured hero occupied two lines at every width, used the loaded Geist font, and had no horizontal overflow or broken images. It contained five image elements using four distinct assets.
 
 ### Review of the captured intermediate version
 

@@ -1,8 +1,9 @@
 """One local operator, one AD5X, no accounts/commerce/database server.
 
-Run using tools/run_print_station.py. This application deliberately accepts only
-loopback UI requests. Physical starts require local configuration and a fresh
-per-job readiness confirmation. A persisted start intent is NEVER resent.
+Run using tools/run_print_station.py. The API accepts only loopback connections;
+an explicit LAN web host may be allowed through the UI proxy. Physical starts require
+local configuration and a fresh per-job readiness confirmation. A persisted start
+intent is NEVER resent.
 """
 
 import asyncio
@@ -14,6 +15,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from hashlib import file_digest, sha256
+from ipaddress import IPv4Address, IPv4Network
 from pathlib import Path
 from typing import Literal, cast
 from uuid import UUID, uuid4
@@ -595,10 +597,27 @@ class Station:
             await asyncio.sleep(3)
 
 
-def create_app(config: StationConfig, directory: Path, *, enable_printer=False, driver=None):
+def private_lan_ipv4(value: str) -> str:
+    address = IPv4Address(value)
+    networks = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+    if not any(address in IPv4Network(network) for network in networks):
+        raise ValueError("Use the computer's private LAN IPv4 address (RFC 1918).")
+    return str(address)
+
+
+def create_app(
+    config: StationConfig,
+    directory: Path,
+    *,
+    enable_printer=False,
+    driver=None,
+    lan_host: str | None = None,
+):
+    web_hosts = {f"127.0.0.1:{config.web_port}"}
+    if lan_host is not None:
+        web_hosts.add(f"{private_lan_ipv4(lan_host)}:{config.web_port}")
+    web_origins = {f"http://{host}" for host in web_hosts}
     station = Station(config, directory, enable_printer=enable_printer, driver=driver)
-    web_host = f"127.0.0.1:{config.web_port}"
-    web_origin = f"http://{web_host}"
 
     @asynccontextmanager
     async def lifespan(app):
@@ -620,15 +639,15 @@ def create_app(config: StationConfig, directory: Path, *, enable_printer=False, 
 
     @app.middleware("http")
     async def local_only(request: Request, call_next):
-        # Check both before reading a body. No CORS, public binding or printer URLs from HTTP.
+        # Only the local proxy may connect; forwarded client headers confer no trust.
         if (
             request.client is None
             or request.client.host not in {"127.0.0.1", "::1", "testclient"}
-            or request.headers.get("host") not in {"127.0.0.1:8123", web_host}
+            or request.headers.get("host") not in {"127.0.0.1:8123", *web_hosts}
         ):
             return JSONResponse({"detail": "Local print station only."}, status_code=403)
         if request.method not in {"GET", "HEAD"} and (
-            request.headers.get("origin") != web_origin
+            request.headers.get("origin") not in web_origins
             or not hmac.compare_digest(request.headers.get("x-station-token", ""), station.token)
         ):
             return JSONResponse(

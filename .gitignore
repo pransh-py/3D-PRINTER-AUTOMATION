@@ -21,3 +21,4 @@ build/
 services/bridge/.state/
 .next-verification/
 .next-print-station/
+.next-lan/

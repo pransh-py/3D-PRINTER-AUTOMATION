@@ -30,6 +30,7 @@ from services.bridge.print_station import (
     StationPricing,
     create_app,
     estimate_slice,
+    private_lan_ipv4,
 )
 from services.bridge.zmod_gcode import prepare_zmod_gcode
 
@@ -367,6 +368,55 @@ def test_station_accepts_only_the_configured_local_web_origin(tmp_path, web_port
         assert (
             client.get("/api/printer/status", headers={"Host": "evil.example"}).status_code == 403
         )
+
+
+def test_lan_access_requires_opt_in_and_exact_host_origin_and_token(tmp_path):
+    config = configuration(tmp_path)
+    config.printer = None
+    origin = f"http://192.168.100.5:{config.web_port}"
+    default_app = create_app(config, tmp_path / "local-jobs")
+    with TestClient(default_app, base_url=origin) as client:
+        assert client.get("/api/printer/status").status_code == 403
+
+    app = create_app(config, tmp_path / "lan-jobs", lan_host="192.168.100.5")
+    with TestClient(app, base_url=origin) as client:
+        assert client.get("/api/printer/status").status_code == 200
+        headers = {"Origin": origin, "X-Station-Token": app.state.station.token}
+        # Only reach schema validation; no upload, slicing or physical command.
+        assert client.post("/api/printer/jobs", headers=headers).status_code == 422
+        for rejected in (
+            {"Origin": "http://192.168.100.6:3102"},
+            {"Origin": "http://192.168.100.5:3100"},
+            {"Origin": "https://evil.example"},
+            {"Origin": "null"},
+            {"X-Station-Token": "wrong"},
+            {"Host": "evil.example", "X-Forwarded-Host": "192.168.100.5:3102"},
+        ):
+            assert (
+                client.post("/api/printer/jobs", headers={**headers, **rejected}).status_code == 403
+            )
+        assert not app.state.station.journal.all()
+    with TestClient(app, base_url=origin, client=("192.168.100.6", 50000)) as direct_client:
+        assert (
+            direct_client.get(
+                "/api/printer/status", headers={"X-Forwarded-For": "127.0.0.1"}
+            ).status_code
+            == 403
+        )
+
+
+@pytest.mark.parametrize("host", ["10.0.0.5", "172.16.2.3", "192.168.100.5"])
+def test_lan_host_accepts_only_explicit_private_ipv4(host):
+    assert private_lan_ipv4(host) == host
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["127.0.0.1", "0.0.0.0", "8.8.8.8", "169.254.1.2", "172.32.0.1", "::1", "printer.local"],
+)
+def test_lan_host_rejects_public_unspecified_loopback_and_non_ipv4(host):
+    with pytest.raises(ValueError):
+        private_lan_ipv4(host)
 
 
 def test_oversized_upload_reports_measured_dimensions_before_slicing(tmp_path, monkeypatch):

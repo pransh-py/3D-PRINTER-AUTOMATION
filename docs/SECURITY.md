@@ -141,8 +141,13 @@ object restore are outstanding. See `LOCAL_WORKFLOW.md` for raw reports, version
 ## Local print station boundary (October 19)
 
 The new printer station is a trusted **single-machine operator tool**, not a public upload
-service. Both web and API bind loopback; the printer rewrite exists only when explicitly
-launched in station mode. Mutations require the exact local UI Origin and a random
+service. Web and API bind loopback by default. The owner's explicit `run --lan-host`
+option additionally permits one RFC 1918 IPv4 web address on the configured web port;
+the API remains loopback-only behind the web proxy. Devices allowed onto that LAN can
+access the operator station and its print controls. Restrict firewall access to the
+trusted local network; no internet port forwarding is configured. The printer rewrite
+exists only when explicitly launched in station mode. Mutations require an exact
+configured UI Origin and a random
 per-process token; Host checks reject DNS rebinding. There is no permissive CORS. HTTP clients
 can select only options, never printer hosts, credentials, filesystem paths or arbitrary commands.
 

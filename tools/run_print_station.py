@@ -1,4 +1,4 @@
-"""Local-only upload / slice / AD5X station. No Docker, accounts or payments."""
+"""Local upload / slice / AD5X station with opt-in trusted LAN web access."""
 
 import argparse
 import fcntl
@@ -32,6 +32,7 @@ from services.bridge.print_station import (  # noqa: E402
     StationPricing,
     create_app,
     estimate_slice,
+    private_lan_ipv4,
 )
 
 DIRECTORY = ROOT / ".local" / "print-station"
@@ -151,6 +152,11 @@ def main():
     )
     run.add_argument("--enable-printer", action="store_true")
     run.add_argument("--api-only", action="store_true")
+    run.add_argument(
+        "--lan-host",
+        type=private_lan_ipv4,
+        help="Allow the trusted operator website at this computer's private LAN IPv4 address.",
+    )
     run.add_argument(
         "--optimized-web", action="store_true", help="Use an existing station-mode Next build."
     )
@@ -367,11 +373,18 @@ def main():
     # One process owns this physical station. The journal additionally enforces one active job.
     with (DIRECTORY / "station.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        app = create_app(config, DIRECTORY / "jobs", enable_printer=args.enable_printer)
+        app = create_app(
+            config,
+            DIRECTORY / "jobs",
+            enable_printer=args.enable_printer,
+            lan_host=args.lan_host,
+        )
         web = None
         try:
             if not args.api_only:
                 environment = {**os.environ, "PRINTFLOW_PRINT_STATION": "1"}
+                if args.lan_host:
+                    environment["PRINTFLOW_LAN_WEB"] = "1"
                 web = subprocess.Popen(
                     [
                         "npm",
@@ -379,7 +392,7 @@ def main():
                         "start" if args.optimized_web else "dev",
                         "--",
                         "--hostname",
-                        "127.0.0.1",
+                        args.lan_host or "127.0.0.1",
                         "--port",
                         str(config.web_port),
                     ],
@@ -387,7 +400,10 @@ def main():
                     env=environment,
                     start_new_session=True,
                 )
-            print(f"Local print station: http://127.0.0.1:{config.web_port}/print")
+            if args.lan_host:
+                print(f"Trusted LAN print station: http://{args.lan_host}:{config.web_port}/print")
+            else:
+                print(f"Local print station: http://127.0.0.1:{config.web_port}/print")
             print(
                 "PHYSICAL STARTS ENABLED"
                 if args.enable_printer

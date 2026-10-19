@@ -39,7 +39,9 @@
     ".next-verification/types/**/*.ts",
     ".next-verification/dev/types/**/*.ts",
     ".next-print-station/types/**/*.ts",
-    ".next-print-station/dev/types/**/*.ts"
+    ".next-print-station/dev/types/**/*.ts",
+    ".next-lan/types/**/*.ts",
+    ".next-lan/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

@@ -284,6 +284,16 @@ Use Padaiparai as directional inspiration for a service-led presentation, but do
 
 ## Outstanding stakeholder decisions
 
+### October 20 trusted LAN access
+
+The owner requested access to the print station from other devices on the same LAN.
+An explicit `run --lan-host <private IPv4>` option may expose the web interface at that
+one address; the API remains on loopback behind the website proxy. This is the same
+trusted operator station, with access to its models, activity and commissioned print
+controls. It adds no public internet hosting, accounts or business checkout. Existing
+profile approvals, one-active-job protection and per-print readiness checks still apply.
+The owner will submit print jobs personally through the website.
+
 ### October 19 delivery correction
 
 #### Robu-style standalone configurator (afternoon correction)

@@ -18,7 +18,7 @@ Do not infer missing pricing, material, tax, shipping, legal, or printer-protoco
 
 ## Source of truth
 
-This file owns durable project and workflow rules. `CLAUDE.md`, Claude agent definitions, and repository skills may add role-specific procedures but must not override this file. Product architecture and public contracts belong in their eventual project documents and must be referenced from here.
+This file owns durable project and workflow rules. `CLAUDE.md` and Claude agent definitions may add role-specific procedures but must not override this file. Product architecture and public contracts belong in their eventual project documents and must be referenced from here.
 
 Codex root is the only orchestrator. A native Codex subagent is never described or treated as a Sonnet executor. Sonnet work is launched only through the local Claude Code CLI with `claude-sonnet-5` pinned.
 

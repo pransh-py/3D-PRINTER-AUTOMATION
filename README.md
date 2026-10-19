@@ -1,36 +1,95 @@
 # PrintFlow — local 3D print station
 
-Current priority: **upload → configure → slice → automatically start one AD5X print**.
-No account, cart, payment, Docker, PostgreSQL or Redis is needed for this local path.
-The existing business site is preserved separately; it is not the printer-control UI.
+Upload a model, configure the plate, slice it with OrcaSlicer, review the cost estimate,
+and optionally start one supervised FlashForge AD5X print from the website.
+The local print station requires no account, cart, payment service, Docker, PostgreSQL or Redis.
 
-On the configured Windows computer, the site and WSL backend use
-**http://127.0.0.1:3100/print**. See [Windows local testing](docs/WINDOWS_LOCAL_TESTING.md)
-for restart commands, profile details and verified upload/slicing results.
-The local page now calculates estimates from actual slicing at the confirmed rates of
-**INR 3/g filament + INR 10/hour printing**, with a separate material/time breakdown.
+## What works
 
-On this configured Mac, start:
+- STL/OBJ uploads with a 3D preview, millimetres/inches and X/Y rotation.
+- PLA/PETG selections, 0.1/0.15/0.2 mm layers, infill, supports and 1–10 copies on one plate.
+- Real OrcaSlicer filament/time measurements and downloadable G-code and sliced 3MF files.
+- Estimates at the owner's confirmed **INR 3/g filament + INR 10/hour printing**, shown
+  separately and saved with the rates used. These exclude additional services, tax and delivery.
+- Persistent job activity, one active job at a time, and explicit readiness confirmation
+  before each physical print. A downloaded or sliced file does not start printing by itself.
+- Optional access from other trusted devices on the same LAN.
 
-```sh
-.venv313/bin/python tools/run_print_station.py run
+## Current Windows installation
+
+Next.js runs on Windows. FastAPI and **OrcaSlicer 2.4.2** run inside Ubuntu WSL.
+The backend stays on `127.0.0.1:8123`; the website proxies `/api/printer/*` to it.
+
+| Access | Print workspace |
+| --- | --- |
+| On the host PC | [http://127.0.0.1:3100/print](http://127.0.0.1:3100/print) |
+| On the same Wi-Fi/LAN | [http://192.168.100.5:3100/print](http://192.168.100.5:3100/print) |
+
+Keep the host PC awake and both services running. The LAN address is specific to this
+installation and can change with DHCP. LAN access shares the operator controls and job
+history with trusted devices; there are no separate LAN user accounts. Internet hosting
+and router port forwarding are not configured.
+
+The commissioned printer has a **0.4 mm nozzle, 220 × 220 × 220 mm build volume and
+Textured PEI plate**. PLA white/black/red map to IFS slots 1/2/3. One supervised red PLA
+cube completed successfully through the ZMOD/Moonraker integration. PLA website printing
+is enabled on the configured installation; PETG remains slicing-only pending profile review.
+The active PLA profiles were resolved from the owner's Orca M1 bundle. New clones do not
+include private printer credentials, profile exports, uploaded models or the job journal.
+
+**Known issue:** a native ZMOD `Printer is Busy` rejection can leave activity at
+`awaiting_start`, because Moonraker may acknowledge the upload before the native start
+fails. Upload acceptance is not proof that the printer started. Inspect the printer before
+any retry; see [the observed failure](docs/WINDOWS_LOCAL_TESTING.md#known-native-busy-response--october-20).
+
+## Run on the LAN
+
+These commands use the already-configured Windows/WSL runtime. For a new installation,
+follow the setup links below first. Use existing services if they are running; stop a
+station only when no job is active. Run from the repository root in separate PowerShell terminals.
+
+Backend, allowing this PC's exact private LAN address:
+
+```powershell
+wsl.exe -d Ubuntu --exec bash -lc 'exec "$HOME/.local/share/printflow-runtime/venv/bin/python" -u tools/run_print_station.py --directory "$HOME/.local/share/printflow-runtime/station" run --api-only --lan-host 192.168.100.5 --enable-printer'
 ```
 
-Open [the print station](http://127.0.0.1:3102/print). This defaults to **slicing only**.
-STL/OBJ, real previews, mm/inches, X/Y rotation, 0.1/0.15/0.2 mm layers, PLA/PETG colours,
-infill, supports and 1–10 copies on one plate are supported. Time and grams come from Orca.
-The local configuration, models, journal and artifacts live privately in `.local/print-station`.
+Omit `--enable-printer` for slicing only. Physical printing requires reviewed profiles,
+the actual plate and spool mapping, and fresh bed-clear/supervision confirmation in the UI.
 
-Physical starts require the printer's actual connection, reviewed profiles, build plate,
-spool mapping and a per-job bed-clear/supervision confirmation. The friend's AD5X has ZMOD;
-Moonraker/G-code is the prepared primary integration. **Actual printer operation is not yet
-verified.** The station runs on Mac/Linux; it can talk directly to the printer on the same LAN,
-so the Windows computer does not need a new service. See [the visit steps](docs/VISIT_PREFLIGHT.md).
+LAN frontend (stop its process before rebuilding):
 
-For a fresh setup, `tools/run_print_station.py --help` lists configuration commands. Prepare
-standalone profiles using `tools/prepare_print_preset.py`; initialize with `init --slicer
-/absolute/OrcaSlicer --version VERSION --pla-manifest /absolute/presets.json`, then explicitly
-select the actual build plate with `plate --type`. Do not enable physical printing from demo profiles.
+```powershell
+$env:PRINTFLOW_PRINT_STATION = '1'
+$env:PRINTFLOW_LAN_WEB = '1'
+npm --prefix apps/web run build
+npm --prefix apps/web run start -- --hostname 192.168.100.5 --port 3100
+```
+
+The LAN frontend uses `.next-lan`, keeping the existing localhost build separate.
+Both services must use the same web port and LAN address. Replace `192.168.100.5` in both
+commands if the PC's address changes. Allow Node.js through the firewall only for the
+trusted LAN. No printer command is sent merely by starting these services.
+
+## Setup and operation
+
+The station requires Node.js 24+, npm 11+, Python 3.13 and a compatible OrcaSlicer CLI.
+The backend uses Unix process/file protections; run it under Linux or Ubuntu WSL on Windows.
+
+- [Windows runtime, localhost/LAN restart commands and verification](docs/WINDOWS_LOCAL_TESTING.md)
+- [Printer connection, owner profile import and commissioning](docs/WINDOWS_PRINTER_SETUP.md)
+- [Architecture](docs/ARCHITECTURE.md) and [security boundaries](docs/SECURITY.md)
+
+`tools/run_print_station.py --help` lists configuration commands. Prepare standalone
+profiles with `tools/prepare_print_preset.py`, initialize with `init --slicer
+/absolute/OrcaSlicer --version VERSION --pla-manifest /absolute/presets.json`, and select
+the actual build plate with `plate --type`. Starts default to disabled. Do not commission
+demo profiles for physical printing. No repository skill package is required to run the app.
+
+On a configured Linux installation, `.venv313/bin/python tools/run_print_station.py run`
+starts the local slicing-only station at [http://127.0.0.1:3102/print](http://127.0.0.1:3102/print)
+by default. Configuration and job files default to ignored `.local/print-station`; the
+Windows runtime instead keeps its private state in the WSL filesystem as documented above.
 
 ## Preserved business workflow (not required for local printing)
 
@@ -44,7 +103,7 @@ For the implemented local quotation-to-fulfilment workflow, isolated browser lab
 launch gates, see [`docs/LOCAL_WORKFLOW.md`](docs/LOCAL_WORKFLOW.md). Razorpay and automatic
 AD5X business-queue dispatch are disabled; lab prices and payment evidence are fictional.
 
-## Prerequisites
+## Business workflow prerequisites
 
 - Node.js 24 or newer
 - npm 11 or newer
@@ -59,7 +118,7 @@ python3.13 -m venv .venv313
 .venv313/bin/pip install -e 'services/api[dev]' -e 'services/worker[dev]'
 ```
 
-## Today's private local setup
+## Private business workflow setup
 
 This starts the real API, Redis worker, PostgreSQL, local SMTP and frontend, not the seeded
 browser fixture. It uses dedicated Docker volumes and private files under ignored `.local/service`.
