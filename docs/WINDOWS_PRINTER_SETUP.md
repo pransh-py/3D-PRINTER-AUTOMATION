@@ -301,3 +301,21 @@ stopped attempts automatically using [both status sources](WINDOWS_LOCAL_TESTING
 checks loaded IFS material/colour again before a start, and never automatically retries.
 This status check does not verify that the bed is physically clear; the operator still
 confirms readiness when choosing **Print for INR …**.
+
+## White PLA mapping correction — October 20
+
+White jobs were rejected because the configured slot 1 reports no filament. The paired
+native API reports white PLA `#FFFFFF` loaded in slot 4, which the owner explicitly approved
+for the website. The current mapping is white/black/red in slots **4/2/3**. The station still
+checks loaded material and exact registered colour before each start. Existing white
+estimates prepared for slot 1 must be regenerated; their stored price/artifacts remain intact.
+
+The correction changed only the saved white slot number. Live readiness checks passed for
+white slot 4, black slot 2 and red slot 3, while empty slot 1 remained rejected. A later red
+attempt's cancellation also settled automatically; no manual job resolution was performed.
+Isolated real-Orca slices of `coaster-01.stl` in both white and red, at 0.20 mm, 20% infill,
+supports off and one copy, each measured 30.85 g and 5,289 seconds for **INR 107.25**. The
+prepared mapping, colour metadata and artifact hashes were verified with printer-driver
+access disabled. Live job/start counts remained unchanged. A brief status connection loss
+recovered before the final ready check. Private verification evidence is in ignored
+`.local/preview/white-slot-final-verification.json`; no website print was submitted.

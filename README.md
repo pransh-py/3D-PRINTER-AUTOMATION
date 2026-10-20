@@ -37,7 +37,8 @@ history with trusted devices; there are no separate LAN user accounts. Internet 
 and router port forwarding are not configured.
 
 The commissioned printer has a **0.4 mm nozzle, 220 × 220 × 220 mm build volume and
-Textured PEI plate**. PLA white/black/red map to IFS slots 1/2/3. One supervised red PLA
+Textured PEI plate**. PLA white/black/red map to IFS slots 4/2/3. White was moved from
+slot 1 to the loaded white PLA in slot 4 with the owner's approval. One supervised red PLA
 cube completed successfully through the ZMOD/Moonraker integration. PLA website printing
 is enabled on the configured installation; PETG remains slicing-only pending profile review.
 The active PLA profiles were resolved from the owner's Orca M1 bundle. New clones do not

@@ -36,6 +36,15 @@ recording these observations. The owner supplied the Orca profile bundle describ
 supervised ZMOD start/colour commissioning subsequently passed for PLA as recorded below.
 Keep uncommissioned material profiles disabled.
 
+### Approved white PLA slot correction — October 20, 2026
+
+The paired native status subsequently reports slot 1 as empty and white PLA `#FFFFFF`
+loaded in slot 4. The owner explicitly approved using white PLA in slot 4. Update only
+`PLA:white` from slot 1 to slot 4, retaining the colour, rates, reviewed profiles and all
+other mappings. Red remains slot 3 and black remains slot 2. Require a new estimate for
+white jobs prepared under the old mapping; do not rewrite old estimates or dispatch them
+under a different preparation context. This configuration correction does not start a print.
+
 ### Owner-supplied Orca bundle — October 20, 2026
 
 The supplied `Flashforge AD5X 0.4 nozzle - M1.orca_printer.zip` contains the custom M1
