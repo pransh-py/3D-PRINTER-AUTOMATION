@@ -397,6 +397,11 @@ class Station:
             "bed_type": self.config.bed_type,
             "mapping": mapping.model_dump() if mapping else None,
             "transport": connection.transport if connection else None,
+            "dispatch_protocol": (
+                "moonraker_upload_native_slot_v1"
+                if connection and connection.transport == "moonraker"
+                else "flashforge_3mf_v1"
+            ),
         }
 
     async def process(self, job_id: str):

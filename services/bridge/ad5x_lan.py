@@ -180,6 +180,55 @@ class AD5XLan:
             )
         return match
 
+    def start_uploaded_gcode(
+        self, *, filename: str, slot: Slot, leveling_before_print: bool
+    ) -> None:
+        """Start one already uploaded single-tool file with its explicit IFS mapping."""
+        if (
+            not fullmatch(r"pf_[0-9a-f]{32}_[0-9a-f]{12}\.gcode", filename)
+            or type(slot.number) is not int
+            or not 1 <= slot.number <= 4
+            or not slot.loaded
+            or not fullmatch(r"[A-Z0-9-]{1,32}", slot.material)
+            or not fullmatch(r"#[0-9A-Fa-f]{6}", slot.colour_hex)
+            or type(leveling_before_print) is not bool
+        ):
+            raise PrinterError("Invalid single-tool native print request. No start was sent.")
+        payload = {
+            "serialNumber": self.serial,
+            "checkCode": self.check_code,
+            "fileName": filename,
+            "levelingBeforePrint": leveling_before_print,
+            # Preserve the existing installed PRINT_ZCOLOR native-start behaviour.
+            "flowCalibration": True,
+            "useMatlStation": True,
+            "gcodeToolCnt": 1,
+            "materialMappings": [
+                {
+                    "toolId": 0,
+                    "slotId": slot.number,
+                    "materialName": slot.material,
+                    "toolMaterialColor": slot.colour_hex,
+                    "slotMaterialColor": slot.colour_hex,
+                }
+            ],
+        }
+        connection = HTTPConnection(self.host, self.port, timeout=self.timeout)
+        try:
+            connection.request(
+                "POST",
+                "/printGcode",
+                body=dumps(payload),
+                headers={"Content-Type": "application/json"},
+            )
+            self._result(connection)
+        except (OSError, ValueError, HTTPException) as error:
+            raise PrinterError(
+                "Native print start is uncertain. Inspect the printer; do not resend."
+            ) from error
+        finally:
+            connection.close()
+
     def upload_and_print(self, source: Path, *, filename: str, slot: Slot) -> None:
         """Send once, after a persisted intent. Every uncertain result is ambiguous."""
         if not fullmatch(r"pf_[0-9a-f]{32}_[0-9a-f]{12}\.3mf", filename):

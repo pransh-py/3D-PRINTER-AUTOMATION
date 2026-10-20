@@ -19,7 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 from xxx_worker.slicing import SliceResult
 
-from services.bridge.ad5x_lan import AD5XLan, PrinterError, PrinterStatus
+from services.bridge.ad5x_lan import AD5XLan, PrinterError, PrinterStatus, Slot
 from services.bridge.moonraker_lan import MoonrakerLan
 from services.bridge.print_station import (
     Connection,
@@ -61,7 +61,19 @@ def simulated_printer(*, moonraker=False, ambiguous=False):
             pass
 
         def do_GET(self):
-            if self.path == "/server/job_queue/status":
+            if self.path == "/printer/objects/query?save_variables=variables":
+                self.reply(
+                    {
+                        "result": {
+                            "status": {
+                                "save_variables": {
+                                    "variables": {"print_leveling": detail.get("_leveling", 0)}
+                                }
+                            }
+                        }
+                    }
+                )
+            elif self.path == "/server/job_queue/status":
                 self.reply(
                     {"result": {"queue_state": "paused", "queued_jobs": detail.get("_queue", [])}}
                 )
@@ -92,14 +104,23 @@ def simulated_printer(*, moonraker=False, ambiguous=False):
                         }
                     }
                 )
+            elif self.path == "/printGcode":
+                if detail.get("_native_start_ambiguous"):
+                    self.connection.shutdown(2)
+                else:
+                    self.reply({"code": detail.get("_native_start_code", 0)})
             elif ambiguous:
                 self.connection.shutdown(2)
             elif moonraker:
                 import re
 
                 name = re.search(rb'filename="([^"]+)"', data)[1].decode()
+                if detail.get("_busy_after_upload"):
+                    detail["status"] = "busy"
+                if detail.get("_spool_changed_after_upload"):
+                    detail["matlStationInfo"]["slotInfos"][0]["materialColor"] = "#161616"
                 self.reply(
-                    {"item": {"path": name}, "print_started": True, "print_queued": False}, 201
+                    {"item": {"path": name}, "print_started": False, "print_queued": False}, 201
                 )
             else:
                 self.reply({"code": 0})
@@ -150,21 +171,116 @@ def test_stock_transport_validates_identity_ready_spool_and_uploads_once(tmp_pat
             driver.status()
 
 
-def test_zmod_uses_gcode_checksum_and_immediate_start_not_3mf(tmp_path):
-    with simulated_printer(moonraker=True) as (port, events, _):
-        driver = MoonrakerLan("127.0.0.1", port=port, allow_loopback_test=True)
+def paired_moonraker(port):
+    return MoonrakerLan(
+        "127.0.0.1",
+        port=port,
+        allow_loopback_test=True,
+        native=AD5XLan(
+            "127.0.0.1", "simulation", "simulation", port=port, allow_loopback_test=True
+        ),
+    )
+
+
+@pytest.mark.parametrize("slot_number,colour_hex", [(4, "#FFFFFF"), (3, "#F72224"), (2, "#161616")])
+def test_zmod_uploads_without_start_then_sends_exact_native_mapping(
+    tmp_path, slot_number, colour_hex
+):
+    with simulated_printer(moonraker=True) as (port, events, detail):
+        detail["matlStationInfo"]["slotInfos"] = [
+            {
+                "slotId": number,
+                "materialName": "PLA",
+                "materialColor": colour,
+                "hasFilament": loaded,
+            }
+            for number, colour, loaded in (
+                (1, "#FFFFFF", False),
+                (2, "#161616", True),
+                (3, "#F72224", True),
+                (4, "#FFFFFF", True),
+            )
+        ]
+        driver = paired_moonraker(port)
         status = driver.status()
-        slot = driver.require_ready(status, slot=1, material="PLA", colour_hex="#FF0000")
+        slot = driver.require_ready(status, slot=slot_number, material="PLA", colour_hex=colour_hex)
+        original = tmp_path / "original.gcode"
+        original.write_text(f"; filament_colour = {colour_hex}\n; filament_type = PLA\n")
         source = tmp_path / "fixture.gcode"
-        source.write_bytes(b"; TRANSPORT FIXTURE ONLY\n")
+        prepare_zmod_gcode(original, source, material="PLA")
         driver.upload_and_print(source, filename=f"pf_{uuid4().hex}_{'a' * 12}.gcode", slot=slot)
-        path, _, body = events[-1]
+        path, _, body = next(event for event in events if event[0] == "/server/files/upload")
         assert path == "/server/files/upload"
         assert (
             b'name="checksum"' in body and sha256(source.read_bytes()).hexdigest().encode() in body
         )
-        assert b'name="print"\r\n\r\ntrue' in body
+        assert b'name="print"\r\n\r\nfalse' in body
         assert b".3mf" not in body
+        path, _, data = events[-1]
+        assert path == "/printGcode"
+        payload = json.loads(data)
+        assert payload["useMatlStation"] is True and payload["gcodeToolCnt"] == 1
+        assert payload["materialMappings"] == [
+            {
+                "toolId": 0,
+                "slotId": slot_number,
+                "materialName": "PLA",
+                "toolMaterialColor": colour_hex,
+                "slotMaterialColor": colour_hex,
+            }
+        ]
+        assert sum(event[0] == "/printGcode" for event in events) == 1
+        assert payload["flowCalibration"] is True
+        assert payload["levelingBeforePrint"] is False
+
+
+def test_zmod_never_falls_back_to_automatic_colour_matching_without_pairing(tmp_path):
+    with simulated_printer(moonraker=True) as (port, events, _):
+        driver = MoonrakerLan("127.0.0.1", port=port, allow_loopback_test=True)
+        with pytest.raises(PrinterError, match="Pair native"):
+            driver.require_ready(driver.status(), slot=4, material="PLA", colour_hex="#FFFFFF")
+        with pytest.raises(PrinterError, match="Pair native"):
+            driver.upload_and_print(
+                tmp_path / "not-read.gcode",
+                filename=f"pf_{uuid4().hex}_{'a' * 12}.gcode",
+                slot=Slot(4, "PLA", "#FFFFFF", True),
+            )
+        assert not any(event[0] in {"/server/files/upload", "/printGcode"} for event in events)
+
+
+def test_zmod_blocks_mismatching_file_colour_before_upload(tmp_path):
+    with simulated_printer(moonraker=True) as (port, events, _):
+        driver = paired_moonraker(port)
+        original = tmp_path / "white.gcode"
+        original.write_bytes(b"; filament_colour = #FFFFFF\n; filament_type = PLA\n")
+        prepared = tmp_path / "prepared.gcode"
+        prepare_zmod_gcode(original, prepared, material="PLA")
+        with pytest.raises(PrinterError, match="differs"):
+            driver.upload_and_print(
+                prepared,
+                filename=f"pf_{uuid4().hex}_{'a' * 12}.gcode",
+                slot=Slot(2, "PLA", "#161616", True),
+            )
+        assert not any(event[0] in {"/server/files/upload", "/printGcode"} for event in events)
+
+
+@pytest.mark.parametrize("change", ["_busy_after_upload", "_spool_changed_after_upload"])
+def test_zmod_rechecks_printer_and_spool_after_nonprinting_upload(tmp_path, change):
+    with simulated_printer(moonraker=True) as (port, events, detail):
+        detail[change] = True
+        driver = paired_moonraker(port)
+        slot = driver.require_ready(driver.status(), slot=1, material="PLA", colour_hex="#FF0000")
+        original = tmp_path / "original.gcode"
+        original.write_bytes(b"; filament_colour = #FF0000\n; filament_type = PLA\n")
+        prepared = tmp_path / "prepared.gcode"
+        prepare_zmod_gcode(original, prepared, material="PLA")
+        with pytest.raises(PrinterError):
+            driver.upload_and_print(
+                prepared, filename=f"pf_{uuid4().hex}_{'a' * 12}.gcode", slot=slot
+            )
+        uploads = [event for event in events if event[0] == "/server/files/upload"]
+        assert len(uploads) == 1 and b'name="print"\r\n\r\nfalse' in uploads[0][2]
+        assert not any(event[0] == "/printGcode" for event in events)
 
 
 def configuration(tmp_path):
@@ -253,7 +369,7 @@ def test_full_station_job_duplicate_and_ambiguous_start_never_resends(
     monkeypatch.setattr("services.bridge.print_station.OrcaSlicer.slice", fixture_slice)
     with simulated_printer(ambiguous=ambiguous, moonraker=moonraker) as (port, events, _):
         driver = (
-            MoonrakerLan("127.0.0.1", port=port, allow_loopback_test=True)
+            paired_moonraker(port)
             if moonraker
             else AD5XLan(
                 "127.0.0.1", "simulation", "simulation", port=port, allow_loopback_test=True
@@ -334,6 +450,9 @@ def test_full_station_job_duplicate_and_ambiguous_start_never_resends(
     [
         ("none", 202, "awaiting_start"),
         ("ambiguous", 202, "needs_attention"),
+        ("native_ambiguous", 202, "needs_attention"),
+        ("native_rejected", 202, "needs_attention"),
+        ("legacy_context", 202, "failed"),
         ("rates_changed", 202, "awaiting_start"),
         ("wrong_price", 409, "sliced"),
         ("not_ready", 422, "sliced"),
@@ -360,14 +479,20 @@ def test_estimate_then_print_reuses_accepted_bytes_and_price_once(
         return SliceResult(artifact, sha256(artifact.read_bytes()).hexdigest(), 1000, 60, "a" * 64)
 
     monkeypatch.setattr("services.bridge.print_station.OrcaSlicer.slice", fixture_slice)
-    with simulated_printer(moonraker=True, ambiguous=issue == "ambiguous") as (port, events, _):
+    with simulated_printer(moonraker=True, ambiguous=issue == "ambiguous") as (
+        port,
+        events,
+        detail,
+    ):
+        detail["_native_start_ambiguous"] = issue == "native_ambiguous"
+        detail["_native_start_code"] = 2 if issue == "native_rejected" else 0
         config = configuration(tmp_path)
         config.pricing = StationPricing(
             material_rate_paise_per_gram=300, machine_rate_paise_per_hour=1000
         )
         config.printer.transport = "moonraker"
         config.printer.zmod_start_reviewed = True
-        driver = MoonrakerLan("127.0.0.1", port=port, allow_loopback_test=True)
+        driver = paired_moonraker(port)
         app = create_app(config, tmp_path / "jobs", enable_printer=True, driver=driver)
         with TestClient(app, base_url="http://127.0.0.1:8123") as client:
             station = app.state.station
@@ -415,6 +540,10 @@ def test_estimate_then_print_reuses_accepted_bytes_and_price_once(
                 (tmp_path / "jobs" / job_id / job["gcode_name"]).write_bytes(b"TAMPERED")
             elif issue == "mapping_changed":
                 config.printer.mappings["PLA:red"].slot = 2
+            elif issue == "legacy_context":
+                context = dict(job["preparation_context"])
+                context.pop("dispatch_protocol")
+                station.journal.update(job_id, preparation_context=context)
             elif issue == "plate_changed":
                 config.bed_type = "High Temp Plate"
             elif issue == "profile_changed":
@@ -442,7 +571,13 @@ def test_estimate_then_print_reuses_accepted_bytes_and_price_once(
             job = client.portal.call(wait_phase, {expected_phase})
             uploads = [event for event in events if event[0] == "/server/files/upload"]
             assert slices == [1], "Starting a quote must not re-slice it."
-            if issue in {"none", "ambiguous", "rates_changed"}:
+            if issue in {
+                "none",
+                "ambiguous",
+                "native_ambiguous",
+                "native_rejected",
+                "rates_changed",
+            }:
                 assert len(uploads) == 1 and prepared in uploads[0][2]
                 assert job["estimate"]["total_paise"] == 317
                 assert client.post(endpoint, json=payload, headers=headers).status_code == 202
@@ -453,6 +588,9 @@ def test_estimate_then_print_reuses_accepted_bytes_and_price_once(
                     == 409
                 )
                 assert sum(event[0] == "/server/files/upload" for event in events) == 1
+                assert sum(event[0] == "/printGcode" for event in events) == (
+                    0 if issue == "ambiguous" else 1
+                )
                 station.journal.recover()
                 assert station.journal.get(job_id)["phase"] == "needs_attention"
                 assert client.post(endpoint, json=payload, headers=headers).status_code == 202
@@ -913,7 +1051,8 @@ def test_private_configuration_preserves_credentials_and_cannot_change_while_run
     not os.environ.get("PRINTFLOW_REAL_ORCA_CONFIG"),
     reason="Opt-in real Orca acceptance; physical printer remains simulated.",
 )
-def test_real_orca_to_simulated_zmod_end_to_end(tmp_path):
+@pytest.mark.parametrize("colour,slot,colour_hex", [("red", 3, "#F72224"), ("white", 4, "#FFFFFF")])
+def test_real_orca_to_simulated_zmod_end_to_end(tmp_path, colour, slot, colour_hex):
     """Real upload/validator/Orca/G-code → loopback Moonraker. NEVER real hardware."""
     config = StationConfig.model_validate_json(
         Path(os.environ["PRINTFLOW_REAL_ORCA_CONFIG"]).read_bytes()
@@ -927,7 +1066,7 @@ def test_real_orca_to_simulated_zmod_end_to_end(tmp_path):
         host="127.0.0.1",
         transport="moonraker",
         zmod_start_reviewed=True,
-        mappings={"PLA:red": Mapping(slot=1, colour_hex="#FF0000")},
+        mappings={f"PLA:{colour}": Mapping(slot=slot, colour_hex=colour_hex)},
     )
     source = Path(os.environ["PRINTFLOW_REAL_ORCA_STL"]).read_bytes()
     chosen = PrintOptions(
@@ -936,13 +1075,27 @@ def test_real_orca_to_simulated_zmod_end_to_end(tmp_path):
         size=len(source),
         source_sha256=sha256(source).hexdigest(),
         material="PLA",
-        colour="red",
+        colour=colour,
         layer_height="0.1",
         quantity=2,
         print_now=False,
     )
-    with simulated_printer(moonraker=True) as (port, events, _):
-        driver = MoonrakerLan("127.0.0.1", port=port, allow_loopback_test=True)
+    with simulated_printer(moonraker=True) as (port, events, detail):
+        detail["matlStationInfo"]["slotInfos"] = [
+            {
+                "slotId": number,
+                "materialName": "PLA",
+                "materialColor": hex_value,
+                "hasFilament": loaded,
+            }
+            for number, hex_value, loaded in (
+                (1, "#FFFFFF", False),
+                (2, "#161616", True),
+                (3, "#F72224", True),
+                (4, "#FFFFFF", True),
+            )
+        ]
+        driver = paired_moonraker(port)
         app = create_app(config, tmp_path / "jobs", enable_printer=True, driver=driver)
         with TestClient(app, base_url="http://127.0.0.1:8123") as client:
             headers = {
@@ -984,9 +1137,21 @@ def test_real_orca_to_simulated_zmod_end_to_end(tmp_path):
             uploads = [event for event in events if event[0] == "/server/files/upload"]
             assert len(uploads) == 1
             assert b"; layer_height = 0.1" in uploads[0][2]
-            assert b"; filament_colour = #FF0000" in uploads[0][2]
+            assert f"; filament_colour = {colour_hex}".encode() in uploads[0][2]
             assert b"; MD5:" in uploads[0][2]
-            assert b"; zmod_color_data = 0|#ff0000|pla" in uploads[0][2]
+            assert f"; zmod_color_data = 0|{colour_hex.lower()}|pla".encode() in uploads[0][2]
+            assert b'name="print"\r\n\r\nfalse' in uploads[0][2]
+            starts = [json.loads(event[2]) for event in events if event[0] == "/printGcode"]
+            assert len(starts) == 1
+            assert starts[0]["materialMappings"] == [
+                {
+                    "toolId": 0,
+                    "slotId": slot,
+                    "materialName": "PLA",
+                    "toolMaterialColor": colour_hex,
+                    "slotMaterialColor": colour_hex,
+                }
+            ]
             assert job["filament_mg"] > 0 and job["duration_seconds"] > 0
             assert client.get(f"/api/printer/jobs/{job_id}/gcode").status_code == 200
             print(

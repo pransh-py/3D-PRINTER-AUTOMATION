@@ -21,6 +21,12 @@ total before committing to a print. The next action is **Print for INR …**, wi
 confirmation. It prints those same prepared files at the accepted estimate. Changing the
 model or print settings requires a new estimate.
 
+Printing sends an explicit tool-to-IFS mapping to the AD5X: white uses slot 4, red slot 3
+and black slot 2. Moonraker uploads the file without starting it; a separate native start
+pins the selected loaded slot. The station does not fall back to automatic colour matching
+or the filament currently in the nozzle. Estimates prepared before this dispatch update
+must be regenerated.
+
 ## Current Windows installation
 
 Next.js runs on Windows. FastAPI and **OrcaSlicer 2.4.2** run inside Ubuntu WSL.

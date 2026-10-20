@@ -164,9 +164,12 @@ duplicate starts inside this station, not independent third-party printer client
 send is never retried; check the printer and its pending queue before acknowledgment. A laptop
 shutdown cannot guarantee a printer stops a job it already received. Use physical controls.
 
-For Moonraker printers, `native-status` can privately pair the native read-only `/detail`
-endpoint without changing the print transport. Pairing credentials stay in the existing
-0600 configuration and never enter status responses or slicer subprocesses. Automatic stop
+For Moonraker printers, `native-status` privately pairs the native API using read-only
+`/detail` validation. Starts require this pair: Moonraker only uploads with `print=false`,
+then a narrow native `/printGcode` request binds the generated filename and verified T0
+slot/material/colour. Browser input cannot choose the endpoint or supply arbitrary commands.
+Pairing credentials stay in the existing 0600 configuration and never enter status
+responses or slicer subprocesses. Automatic stop
 detection requires consistent native and Moonraker idle evidence; missing connections,
 heating, paused/busy states or queued work never count as proof of a stopped attempt.
 The monitor only updates local job status and never issues stop, reset or retry commands.

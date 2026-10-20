@@ -286,8 +286,8 @@ remains unavailable because of the saved origin permission denial; this test did
 
 ## Pair native status for automatic stop detection
 
-For the commissioned Moonraker connection, native status can be added without changing
-the print transport. Stop the station when no print is executing or preparing, then run:
+For the commissioned Moonraker connection, native pairing is required for live IFS checks
+and explicitly mapped starts. Stop the station when no print is executing or preparing, then run:
 
 ```powershell
 wsl.exe -d Ubuntu --exec /home/praanesh_mb/.local/share/printflow-runtime/venv/bin/python tools/run_print_station.py --directory /home/praanesh_mb/.local/share/printflow-runtime/station native-status
@@ -319,3 +319,32 @@ prepared mapping, colour metadata and artifact hashes were verified with printer
 access disabled. Live job/start counts remained unchanged. A brief status connection loss
 recovered before the final ready check. Private verification evidence is in ignored
 `.local/preview/white-slot-final-verification.json`; no website print was submitted.
+
+## White-to-black start failure and explicit mapping correction
+
+The subsequent white `large.stl` attempt had correct white metadata and slot-4 preparation,
+but the start log explicitly selected `T0 -> 2: PLA/black`. The saved automatic matching
+setting had become zero. The earlier file/readiness checks did not prove which slot the
+ZMOD start wrapper would actually select. That attempt is not a successful white test.
+
+The bridge now uploads to Moonraker with `print=false`, validates that no start/queue was
+reported, rechecks readiness and calls native `/printGcode` for that filename with one
+explicit T0 mapping. White maps to loaded PLA `#FFFFFF` in slot 4, red to slot 3, black to
+slot 2. File material/colour must match the selected slot before upload. The existing
+PRINT_ZCOLOR flow-calibration flag and configured print-leveling choice are preserved;
+no native firmware, macros, purge settings or slicer start/end G-code are edited.
+See [the native start contract](https://github.com/Parallel-7/flashforge-api-docs/wiki/HTTP-REST-API).
+
+Previous estimates must be regenerated because their preparation context lacks the new
+dispatch protocol version. An ambiguous or rejected native start is never retried. A
+physical white first-layer result remains pending the owner's website test; code and
+loopback verification are not a claim that another physical print has succeeded.
+
+All 90 station tests passed with real Orca acceptance enabled. The white and red acceptance
+cases used a loopback printer and checked the actual native request: exactly one T0-to-4
+white or T0-to-3 red mapping, after a non-printing upload, with unchanged accepted files
+and price. Regressions cover unpaired starts, file/slot mismatch, busy or changed spools
+after upload, legacy preparation contexts and rejected/ambiguous native starts without
+resending. The updated backend is running. After a temporary connection loss, both website
+status routes reported the printer ready, no active job and the incident attempt stopped
+automatically. Live job/start counts stayed unchanged; no physical retry was submitted.

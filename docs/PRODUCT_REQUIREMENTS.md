@@ -45,6 +45,21 @@ other mappings. Red remains slot 3 and black remains slot 2. Require a new estim
 white jobs prepared under the old mapping; do not rewrite old estimates or dispatch them
 under a different preparation context. This configuration correction does not start a print.
 
+### Explicit colour handoff correction — October 20, 2026
+
+A later white job contained correct `#FFFFFF` metadata and slot-4 preparation, but the
+printer's start log selected `T0 -> 2: PLA/black`. Live `auto_assign_colors` was zero.
+Physical Moonraker starts must therefore upload with `print=false`, then use the paired
+AD5X native `/printGcode` request with exactly one explicit T0-to-verified-slot mapping.
+Use the uploaded filename and the file's declared material/colour, preserve the installed
+ZMOD native start's flow-calibration flag and configured leveling choice, and recheck
+readiness after upload. No arbitrary G-code console, automatic fallback, macro/firmware
+edit or retry is introduced. Pairing is required for physical starts. Version this
+dispatch contract in preparation context so older estimates require fresh slicing.
+Upload acceptance must never start a file, and a rejected or ambiguous native start
+remains blocked without a resend. A physical white first-layer result remains unverified
+until the owner starts a fresh job from the website and observes it.
+
 ### Owner-supplied Orca bundle — October 20, 2026
 
 The supplied `Flashforge AD5X 0.4 nozzle - M1.orca_printer.zip` contains the custom M1

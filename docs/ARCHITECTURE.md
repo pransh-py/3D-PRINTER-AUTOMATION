@@ -213,11 +213,16 @@ after intent blocks further jobs for inspection, never retrying the physical sen
 not guarantee printer/network availability or rule out actions from other printer clients.
 
 For the confirmed ZMOD installation, Moonraker receives the generated single-tool G-code
-with its checksum and `print=true`. ZMOD compatibility metadata and MD5 are prepended as
-comments; SHA-256 identifies the exact dispatch artifact. Standard Moonraker does not expose
-IFS colour identity. Optional, privately paired native `/detail` status adds live
-slot/material/colour checks; commissioned matching and a fresh physical operator check
-are still required.
+with its checksum and `print=false`. After confirming a non-printing upload and rechecking
+idle state and live IFS material/colour, the paired native AD5X `/printGcode` request starts
+that exact filename with an explicit T0-to-slot mapping. Physical starts require native
+pairing; automatic matching and the currently loaded spool are never a fallback. The
+existing native start's flow-calibration flag and configured leveling choice are retained.
+ZMOD compatibility metadata and MD5 remain in the artifact; SHA-256 identifies the exact
+bytes. The declared material/colour must match the requested slot before any upload.
+Preparation context versions this dispatch protocol; earlier estimates need a fresh slice.
+Standard Moonraker does not expose IFS colour identity. Paired native `/detail` status
+provides the live slot checks, alongside a fresh physical operator readiness confirmation.
 The explicit stock adapter instead sends a sliced 3MF using FlashForge's LAN contract and
 checks its live IFS slot/material/colour. No transport is silently substituted for another.
 

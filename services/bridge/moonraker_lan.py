@@ -1,7 +1,7 @@
-"""ZMOD transport using documented Moonraker APIs, with no arbitrary G-code RPC.
+"""Moonraker file transfer followed by an explicitly mapped native AD5X start.
 
-The operator must commission ZMOD single-material colour matching and the silent
-start settings separately. Moonraker standard status does NOT prove spool colour.
+No arbitrary G-code RPC is exposed. Native pairing and live IFS checks are required
+for starts; ZMOD's automatic colour selection is not used as a physical guarantee.
 """
 
 from dataclasses import dataclass, field
@@ -10,7 +10,7 @@ from http.client import HTTPConnection, HTTPException
 from json import dumps, loads
 from math import isfinite
 from pathlib import Path
-from re import fullmatch
+from re import fullmatch, match
 from uuid import uuid4
 
 from services.bridge.ad5x_lan import AD5XLan, PrinterError, PrinterStatus, Slot
@@ -203,23 +203,23 @@ class MoonrakerLan:
     def require_ready(status, *, slot, material, colour_hex):
         if status.state not in {"ready", "completed"} or status.error:
             raise PrinterError("ZMOD printer is not idle and error-free. No print was sent.")
-        if status.native_state is not None:
-            match = next((item for item in status.slots if item.number == slot), None)
-            if (
-                not match
-                or not match.loaded
-                or match.material != material.upper()
-                or match.colour_hex != colour_hex.upper()
-            ):
-                raise PrinterError(
-                    "The selected IFS slot is not loaded with the configured material/colour."
-                )
-        # These are commissioned values AND a fresh operator attestation, not
-        # purported live IFS sensor readings. Standard Moonraker has no colour sensor.
-        return Slot(slot, material, colour_hex, True)
+        if status.native_state is None:
+            raise PrinterError("Pair native AD5X status before printing. No start was sent.")
+        match = next((item for item in status.slots if item.number == slot), None)
+        if (
+            not match
+            or not match.loaded
+            or match.material != material.upper()
+            or match.colour_hex != colour_hex.upper()
+        ):
+            raise PrinterError(
+                "The selected IFS slot is not loaded with the configured material/colour."
+            )
+        return match
 
     def upload_and_print(self, source: Path, *, filename: str, slot: Slot):
-        del slot  # Colour matching is in reviewed ZMOD settings and sliced metadata.
+        if not self.native:
+            raise PrinterError("Pair native AD5X status before printing. No start was sent.")
         if not fullmatch(r"pf_[0-9a-f]{32}_[0-9a-f]{12}\.gcode", filename):
             raise ValueError("Use a unique station-generated G-code filename.")
         size = source.stat().st_size
@@ -227,8 +227,34 @@ class MoonrakerLan:
             raise PrinterError("G-code exceeds the upload limit.")
         with source.open("rb") as stream:
             digest = file_digest(stream, "sha256").hexdigest()
+            stream.seek(0)
+            metadata = match(
+                rb"^; MD5:[0-9a-f]{32}\r?\n; zmod_color_data = 0\|(#[0-9a-fA-F]{6})\|"
+                rb"([a-z0-9-]+)\r?\n",
+                stream.read(512),
+            )
+        if (
+            not metadata
+            or metadata[1].decode().upper() != slot.colour_hex.upper()
+            or metadata[2].decode().upper() != slot.material.upper()
+        ):
+            raise PrinterError("Prepared file colour/material differs from the selected IFS slot.")
+        settings = HTTPConnection(self.host, self.port, timeout=self.timeout)
+        try:
+            settings.request(
+                "GET", "/printer/objects/query?save_variables=variables", headers=self.headers
+            )
+            leveling = self.result(settings)["status"]["save_variables"]["variables"].get(
+                "print_leveling", 0
+            )
+            if type(leveling) is not int or leveling not in {0, 1}:
+                raise ValueError
+        except (OSError, HTTPException, KeyError, TypeError, ValueError) as error:
+            raise PrinterError("Native start settings unavailable. No file was sent.") from error
+        finally:
+            settings.close()
         boundary = "PrintFlow" + uuid4().hex
-        fields = {"root": "gcodes", "print": "true", "checksum": digest}
+        fields = {"root": "gcodes", "print": "false", "checksum": digest}
         prefix = b"".join(
             (
                 f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'
@@ -258,11 +284,12 @@ class MoonrakerLan:
             result = self.result(connection, expected=201)
             if (
                 result.get("item", {}).get("path") != filename
-                or result.get("print_started") is not True
+                or result.get("print_started") is not False
                 or result.get("print_queued") is not False
             ):
                 raise PrinterError(
-                    "No immediate start confirmation. Inspect the printer; do not resend."
+                    "Upload did not confirm a non-printing file. "
+                    "Inspect the printer; do not resend."
                 )
         except (OSError, HTTPException, ValueError, AttributeError) as error:
             raise PrinterError(
@@ -270,3 +297,10 @@ class MoonrakerLan:
             ) from error
         finally:
             connection.close()
+        current = self.status()
+        verified = self.require_ready(
+            current, slot=slot.number, material=slot.material, colour_hex=slot.colour_hex
+        )
+        self.native.start_uploaded_gcode(
+            filename=filename, slot=verified, leveling_before_print=bool(leveling)
+        )
