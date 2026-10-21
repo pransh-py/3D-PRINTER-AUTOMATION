@@ -21,6 +21,19 @@ test("computes the lowercase hex SHA-256 digest of a file's contents", async () 
   assert.match(digest, /^[0-9a-f]{64}$/);
 });
 
+test("quote uploads hash files on LAN HTTP without SubtleCrypto", async () => {
+  const originalCrypto = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: {} });
+  try {
+    assert.equal(
+      await computeFileSha256(new File(["hello world"], "part.stl")),
+      "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+    );
+  } finally {
+    if (originalCrypto) Object.defineProperty(globalThis, "crypto", originalCrypto);
+  }
+});
+
 test("rejects unsupported, empty, oversized, and too-numerous file selections", () => {
   const good = new File(["abc"], "part.stl");
   const badFormat = new File(["abc"], "part.exe");

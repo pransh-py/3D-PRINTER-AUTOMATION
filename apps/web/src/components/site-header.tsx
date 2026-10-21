@@ -10,17 +10,19 @@ export function SiteHeader({
   workspace = false,
   dashboard,
   startHref = printEntry(),
+  presentation = false,
 }: {
   workspace?: boolean;
   dashboard?: "buyer" | "owner";
   startHref?: "/get-a-quote" | "/print";
+  presentation?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   const account =
     dashboard === "owner"
       ? { label: "Owner dashboard", href: "/operations" }
-      : { label: "My orders", href: "/orders" };
+      : { label: presentation ? "My prints" : "My orders", href: "/orders" };
   const links = workspace
     ? [
         { label: "Configure print", href: "/print" },

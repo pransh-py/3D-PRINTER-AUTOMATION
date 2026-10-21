@@ -27,6 +27,7 @@ from xxx_api.models.identity import (
     User,
 )
 from xxx_api.models.notifications import Notification
+from xxx_api.models.presentation import PresentationEntry, PresentationStation
 from xxx_api.models.pricing import MaterialRate, PricingPolicy, QuoteEstimate
 from xxx_api.models.quotes import ModelAsset, QuoteRequest
 
@@ -48,6 +49,8 @@ __all__ = [
     "PaymentAttempt",
     "PaymentIntent",
     "PaymentProviderEvent",
+    "PresentationEntry",
+    "PresentationStation",
     "PricingPolicy",
     "PrintAuthorization",
     "PrintJob",

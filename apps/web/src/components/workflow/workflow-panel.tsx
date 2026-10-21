@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { submissionId } from "@/lib/client-crypto";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
@@ -964,7 +965,7 @@ function RequestCard({
                   createQuoteEstimate(
                     request.id,
                     {
-                      clientToken: crypto.randomUUID(),
+                      clientToken: submissionId(),
                       expectedQuoteVersion: request.version,
                       analysisRunId: analysis.id,
                       materialCode: analysis.materialCode ?? "",

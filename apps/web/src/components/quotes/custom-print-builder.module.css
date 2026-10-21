@@ -1,0 +1,17 @@
+.builder { align-items: start; }
+.builder :is(button,input,select,textarea) { font: inherit; }
+.builder :is(button,input,select,textarea):focus-visible { outline: 3px solid var(--link); outline-offset: 3px; }
+.builder :is(button,input,select,textarea):disabled { opacity: .5; cursor: not-allowed; }
+.files { padding: 0; list-style: none; margin: 20px 0; }
+.files li { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); padding: 12px 0; }
+.files li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; }
+.files small { display: block; margin-top: 5px; color: var(--muted); }
+.files button { color: var(--link); background: none; border: 0; padding: 10px 4px; cursor: pointer; font-size: 12px; }
+.files button[aria-pressed=true] { text-decoration: underline; }
+.select,.field select,.field textarea { width: 100%; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 12px; }
+.field { display: grid; gap: 10px; margin: 20px 0; font-size: 13px; }
+.field textarea { min-height: 84px; resize: vertical; }
+.estimate { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 18px 0; border-top: 1px solid var(--line); }
+.estimate span { font-size: 14px; }
+.estimate strong { font-size: 24px; letter-spacing: -.5px; }
+.estimate p { grid-column: 1 / -1; color: var(--muted); margin: 0 0 8px; font-size: 12px; line-height: 1.6; }

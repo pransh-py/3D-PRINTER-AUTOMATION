@@ -31,8 +31,15 @@ const QUESTIONS = [
 
 export default function Home() {
   const stationMode = process.env.PRINTFLOW_PRINT_STATION === "1";
+  const presentation = process.env.PRINTFLOW_PRESENTATION_MODE === "1";
   const entry = printEntry(stationMode);
-  const questions = stationMode
+  const questions = presentation ? [
+    ["What files can I upload?", "Upload one STL or OBJ model, up to 100 MiB. Preview, units and orientation controls support files up to 16 MiB."],
+    ["When do I see the estimate?", "Slicing measures your model's reference printing cost and print duration. Review them before submitting to the owner waiting list."],
+    ["Is this demonstration free?", "Yes. Presentation prints are free. The reference cost explains the material and machine time used."],
+    ["How does my model get printed?", "The owner admits your submission to the work queue. The local service sends each model once the printer is ready and the owner clears the plate."],
+    ["What happens between prints?", "The owner removes the finished part and confirms a clear plate before the next queued model starts."],
+  ] : stationMode
     ? QUESTIONS
     : [
         [
@@ -58,7 +65,7 @@ export default function Home() {
       ];
   return (
     <div className={styles.home} id="top">
-      <SiteHeader startHref={entry} />
+      <SiteHeader startHref={entry} presentation={presentation} />
       <main id="main-content">
         <section className={styles.hero} aria-labelledby="hero-title">
           <div className={styles.heroCopy}>
@@ -255,7 +262,9 @@ export default function Home() {
               <div>
                 <h3>Make it your own.</h3>
                 <p>
-                  {stationMode
+                  {presentation
+                    ? "Choose your material, colour and layer height. Set the infill and supports for your model."
+                    : stationMode
                     ? "Choose a material, colour and layer height. Set the infill, supports and number of copies."
                     : "Select an approved material, colour and print profile, then choose copies and delivery."}
                 </p>
@@ -265,10 +274,10 @@ export default function Home() {
               <UiIcon name="cube" />
               <div>
                 <h3>
-                  {stationMode ? "Slice. Review. Print." : "Review. Order. Follow along."}
+                  {presentation ? "Estimate. Submit. Follow along." : stationMode ? "Slice. Review. Print." : "Review. Order. Follow along."}
                 </h3>
                 <p>
-                  {stationMode
+                  {presentation ? "See the measured cost and print time, then submit to the waiting list. The owner admits models into the work queue. This presentation is free." : stationMode
                     ? "See the slicer’s time and filament estimate. A prepared printer and operator confirmation come before any physical start."
                     : "Accept your reviewed quotation and complete payment. The owner prepares your print; follow production and handover in your dashboard."}
                 </p>
@@ -331,8 +340,8 @@ export default function Home() {
           <p>3D printing, made in Chennai.</p>
           <nav aria-label="Footer navigation">
             <Link href={entry}>{stationMode ? "Print workspace" : "Start a print"}</Link>
-            <Link href="/get-a-quote">Request a quote</Link>
-            <Link href="/orders">My orders</Link>
+            <Link href="/get-a-quote">{presentation ? "Get an estimate" : "Request a quote"}</Link>
+            <Link href="/orders">{presentation ? "My prints" : "My orders"}</Link>
             <a href="#top">
               Back to top
               <UiIcon name="arrow-up" />

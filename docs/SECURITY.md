@@ -52,7 +52,12 @@
 
 ## Upload and slicing controls
 
-The owner-approved local-folder backend is development/test-only and loopback-only. Its uploads
+The owner-approved local-folder backend is development/test-only and loopback-only by default.
+For the owner's explicitly requested trusted-LAN storefront, `storage_local_lan_origin` may
+name one exact HTTP origin with an RFC1918 IPv4 address. Only that origin and loopback origins
+are accepted; other LAN addresses, ports, public hosts and staging/production remain rejected.
+The API, database, Redis and WhatsApp sender still bind loopback. The web proxy preserves
+the browser's Origin, authenticated session and CSRF checks. Its uploads
 are authenticated, CSRF-protected streams tied to private buyer-owned intents, with exact size/hash
 checks. Server keys are hashed into opaque directory names, not interpreted as paths. No public
 file-serving route exists. Use a private filesystem directory, keep configuration/access files out

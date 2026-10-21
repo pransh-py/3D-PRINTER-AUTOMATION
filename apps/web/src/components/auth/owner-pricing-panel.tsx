@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { submissionId } from "@/lib/client-crypto";
 
 import { listQuoteRequests, type QuoteRequest } from "@/lib/quote-api";
 import {
@@ -175,7 +176,7 @@ export function OwnerPricingPanel() {
       await createQuoteEstimate(
         quote.id,
         {
-          clientToken: crypto.randomUUID(),
+          clientToken: submissionId(),
           expectedQuoteVersion: quote.version,
           analysisRunId: quote.latestAnalysis.id,
           materialCode: String(data.get("materialCode")),

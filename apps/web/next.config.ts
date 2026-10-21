@@ -6,7 +6,9 @@ const apiInternalUrl = (
 
 const nextConfig: NextConfig = {
   distDir:
-    process.env.PRINTFLOW_PRINT_STATION === "1" &&
+    process.env.PRINTFLOW_PRESENTATION_MODE === "1"
+      ? ".next-presentation"
+      : process.env.PRINTFLOW_PRINT_STATION === "1" &&
     process.env.PRINTFLOW_WEB_VERIFICATION === "1"
       ? ".next-station-verification"
       : process.env.PRINTFLOW_LAN_WEB === "1"

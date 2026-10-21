@@ -26,6 +26,8 @@ from xxx_api.routes.dashboard import router as dashboard_router
 from xxx_api.routes.health import router as health_router
 from xxx_api.routes.notifications import router as notifications_router
 from xxx_api.routes.payments import router as payments_router
+from xxx_api.routes.presentation import bridge_router as presentation_bridge_router
+from xxx_api.routes.presentation import router as presentation_router
 from xxx_api.routes.pricing import router as pricing_router
 from xxx_api.routes.quotes import router as quotes_router
 from xxx_api.services.commerce import WorkflowConflictError, WorkflowNotFoundError
@@ -82,10 +84,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(quotes_router, prefix=runtime_settings.api_prefix)
     app.include_router(catalogue_router, prefix=runtime_settings.api_prefix)
     app.include_router(pricing_router, prefix=runtime_settings.api_prefix)
-    app.include_router(commerce_router, prefix=runtime_settings.api_prefix)
+    if not runtime_settings.presentation_mode:
+        app.include_router(commerce_router, prefix=runtime_settings.api_prefix)
     app.include_router(dashboard_router, prefix=runtime_settings.api_prefix)
     app.include_router(bridge_router, prefix=runtime_settings.api_prefix)
-    app.include_router(payments_router, prefix=runtime_settings.api_prefix)
+    if not runtime_settings.presentation_mode:
+        app.include_router(payments_router, prefix=runtime_settings.api_prefix)
+    app.include_router(presentation_router, prefix=runtime_settings.api_prefix)
+    app.include_router(presentation_bridge_router, prefix=runtime_settings.api_prefix)
     app.include_router(notifications_router, prefix=runtime_settings.api_prefix)
 
     @app.exception_handler(GatewayUnavailableError)

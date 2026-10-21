@@ -1,4 +1,30 @@
-# PrintFlow — local 3D print station
+# PrintFlow — 3D printing storefront and local station
+
+## Free presentation flow
+
+The current buyer/owner presentation uses **upload → measured estimate and print time →
+submit to waiting list → owner admission → FIFO work queue**. Presentation prints are
+free. The sliced cost is a reference value at INR 3/g + INR 10/hour; there is no checkout,
+payment, invoice or paid-order step. The previous commercial workflow remains available
+when presentation mode is off.
+
+Enable `XXX_PRESENTATION_MODE=true` for the API and worker and
+`PRINTFLOW_PRESENTATION_MODE=1` when building/running the frontend. Apply database
+migrations first. The separate frontend build is `.next-presentation`.
+Buyers use `/get-a-quote` and `/orders`; the owner uses `/operations`.
+
+Automatic dispatch supports one STL/OBJ model and one copy per submission, using the
+commissioned AD5X profile and its layer-height, infill and support variants. The outbound
+service runs with `tools/run_presentation_station.py`, private pairing credentials and
+the same exclusive native-station lock. Never run two printer controllers concurrently.
+Each queued print needs fresh owner plate clearance and recent operator MFA. The service
+checks the actual printer/spool state and sends once; a restart or ambiguous response
+requires inspection rather than an automatic retry. Remove each completed part before
+clearing the next plate. Offline printers leave jobs queued.
+
+See [Windows LAN storefront setup](docs/WINDOWS_LAN_STOREFRONT.md).
+
+## Direct local station workflow
 
 Upload a model, configure the plate, slice it with OrcaSlicer, review the cost estimate,
 and optionally start one supervised FlashForge AD5X print from the website.

@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import dynamic from "next/dynamic";
+import { submissionId } from "@/lib/client-crypto";
 import { useRouter } from "next/navigation";
 import {
-  type ChangeEvent,
   type FormEvent,
   useCallback,
   useEffect,
@@ -39,22 +38,18 @@ import {
 
 import styles from "./quote-request.module.css";
 import { listPrintPresets, type PrintPreset } from "@/lib/print-specification";
-import { PrintSpecificationSummary } from "./print-specification-summary";
 import { StatusBadge } from "@/components/status-badge";
-import { UiIcon } from "@/components/ui-icon";
 import {
   firstInvalidStep,
   validateQuoteStep,
   type QuoteDraft,
 } from "@/lib/order-journey";
-import { swatchColour, type ModelStats } from "@/lib/model-options";
+import { DEFAULT_MODEL_OPTIONS, type ModelOptions } from "@/lib/model-options";
+import { configuredModel } from "@/lib/configured-model";
+import { CustomPrintBuilder } from "./custom-print-builder";import { PrintSpecificationSummary } from "./print-specification-summary";import { joinPresentationQueue, listPresentationQueue } from "@/lib/presentation-api";
+const MAX_FILE_MIB = Math.floor(MAX_MODEL_FILE_BYTES / (1024 * 1024));
 
-const STEPS = ["Model", "Print options", "Delivery", "Review"] as const;
-const DELIVERY = {
-  pickup: "Pickup",
-  local_delivery: "Local delivery",
-  shipping: "Pan-India shipping",
-} as const;
+
 
 type FileProgressStatus =
   | "pending"
@@ -70,9 +65,6 @@ type FileProgressEntry = Readonly<{
   status: FileProgressStatus;
 }>;
 
-const ACCEPT_ATTRIBUTE = SUPPORTED_MODEL_EXTENSIONS.join(",");
-const MAX_FILE_MIB = Math.floor(MAX_MODEL_FILE_BYTES / (1024 * 1024));
-const ModelPreview = dynamic(() => import("./model-preview"), { ssr: false });
 
 function describeRejection(rejection: ModelFileRejection): string {
   switch (rejection.reason) {
@@ -87,13 +79,6 @@ function describeRejection(rejection: ModelFileRejection): string {
   }
 }
 
-function formatBytes(bytes: number): string {
-  const mib = bytes / (1024 * 1024);
-  if (mib >= 1) {
-    return `${mib.toFixed(1)} MiB`;
-  }
-  return `${Math.max(1, Math.round(bytes / 1024))} KiB`;
-}
 
 function formatDate(iso: string): string {
   const date = new Date(iso);
@@ -189,17 +174,13 @@ function analysisAssetSummary(asset: AnalysisAssetResult): string {
   return parts.join(" · ");
 }
 
-export function QuoteRequestPanel() {
+export function QuoteRequestPanel({ presentation = false }: { presentation?: boolean } = {}) {
+  const [queuedRequestIds, setQueuedRequestIds] = useState<readonly string[]>([]);
+  const [queueingRequest, setQueueingRequest] = useState<string | null>(null);
   const router = useRouter();
   const [accountAttempt, setAccountAttempt] = useState(0);
   const [needsSignIn, setNeedsSignIn] = useState(false);
-  const [step, setStep] = useState(0);
   const [stepError, setStepError] = useState<string | null>(null);
-  const [previewIndex, setPreviewIndex] = useState(0);
-  const [modelStats, setModelStats] = useState<ModelStats | null>(null);
-  const stepHeading = useRef<HTMLHeadingElement>(null);
-  const successHeading = useRef<HTMLHeadingElement>(null);
-  const movedStep = useRef(false);
   const focusedHash = useRef("");
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
@@ -224,8 +205,9 @@ export function QuoteRequestPanel() {
       .then((items) => {
         if (!active) return;
         setPresets(items);
-        setPresetCode(items[0]?.code ?? "");
-        setColour(items[0]?.colours[0] ?? "");
+        const preferred = items.find(item => Number(item.settings.layerHeightMm) === 0.2 && item.settings.infillPercent === 20 && !item.settings.supports) ?? items[0];
+        setPresetCode(preferred?.code ?? "");
+        setColour(preferred?.colours[0] ?? "");
       })
       .catch((caught: unknown) => {
         if (active)
@@ -255,6 +237,15 @@ export function QuoteRequestPanel() {
   const [recentLoading, setRecentLoading] = useState(false);
   const [recentError, setRecentError] = useState<string | null>(null);
 
+  const [model, setModel] = useState<ModelOptions>(DEFAULT_MODEL_OPTIONS);
+  const [preparedKey, setPreparedKey] = useState("");
+  const [queuedKey, setQueuedKey] = useState("");
+  const configurationKey = JSON.stringify({ files: selectedFiles.map(file => [file.name, file.size, file.lastModified]), presetCode, colour, quantity, fulfillmentMode, buyerNotes, model });
+  const currentRequest = completedQuote && preparedKey === configurationKey
+    ? recent?.items.find(item => item.id === completedQuote.id) ?? completedQuote : null;
+  const prepared = Boolean(currentRequest && !["analysis_failed", "rejected"].includes(currentRequest.status));
+  const estimating = Boolean(currentRequest && !currentRequest.latestEstimate && ["analyzing", "analysis_ready"].includes(currentRequest.status));
+
   const draft: QuoteDraft = {
     fileCount: selectedFiles.length,
     selectionErrors,
@@ -264,29 +255,6 @@ export function QuoteRequestPanel() {
     fulfillmentMode,
     notes: buyerNotes,
   };
-  function moveStep(target: number) {
-    if (submitting) return;
-    if (target > step) {
-      for (let current = 0; current < target; current++) {
-        const error = validateQuoteStep(current, draft);
-        if (error) {
-          setStepError(error);
-          setStep(current);
-          movedStep.current = true;
-          return;
-        }
-      }
-    }
-    setStepError(null);
-    movedStep.current = true;
-    setStep(target);
-  }
-  useEffect(() => {
-    if (movedStep.current) stepHeading.current?.focus();
-  }, [step]);
-  useEffect(() => {
-    if (completedQuote) successHeading.current?.focus();
-  }, [completedQuote]);
   useEffect(() => {
     const hash = window.location.hash.slice(1);
     if (
@@ -338,8 +306,12 @@ export function QuoteRequestPanel() {
     setRecentLoading(true);
     setRecentError(null);
     try {
-      const list = await listQuoteRequests();
+      const [list, queue] = await Promise.all([
+        listQuoteRequests(),
+        presentation ? listPresentationQueue() : Promise.resolve(null),
+      ]);
       setRecent(list);
+      if (queue) setQueuedRequestIds(queue.items.map(item => item.requestId));
     } catch (caught) {
       setRecentError(
         caught instanceof QuoteApiError
@@ -349,7 +321,7 @@ export function QuoteRequestPanel() {
     } finally {
       setRecentLoading(false);
     }
-  }, []);
+  }, [presentation]);
 
   useEffect(() => {
     if (user === null || user.role !== "buyer") {
@@ -392,20 +364,11 @@ export function QuoteRequestPanel() {
     };
   }, [analysisInProgress, user?.role]);
 
-  function handleFilesSelected(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files ?? []);
-    event.target.value = "";
-    if (files.length) selectFiles(files);
-  }
-
   function selectFiles(files: readonly File[]) {
     setCompletedQuote(null);
     setSubmitError(null);
     setProgress([]);
     setStepError(null);
-    setStep(0);
-    setPreviewIndex(0);
-    setModelStats(null);
 
     const validation = validateModelSelection(files);
     const errors: string[] = [];
@@ -425,6 +388,7 @@ export function QuoteRequestPanel() {
     }
 
     setSelectionErrors([]);
+    setModel(DEFAULT_MODEL_OPTIONS);
     setSelectedFiles(files);
   }
 
@@ -433,11 +397,8 @@ export function QuoteRequestPanel() {
       current.filter((_, position) => position !== index),
     );
     setSelectionErrors([]);
-    setPreviewIndex(0);
-    setModelStats(null);
     setProgress([]);
     setSubmitError(null);
-    setStep(0);
   }
 
   function updateProgress(index: number, status: FileProgressStatus) {
@@ -450,14 +411,28 @@ export function QuoteRequestPanel() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (step !== 3) {
-      moveStep(step + 1);
+    if (prepared && currentRequest) {
+      if (!presentation || queuedKey === configurationKey) {
+        router.push(presentation ? "/orders" : `/orders#request-${currentRequest.id}`);
+        return;
+      }
+      setSubmitting(true); setSubmitError(null);
+      try {
+        await joinPresentationQueue(currentRequest);
+        setQueuedKey(configurationKey);
+        setQueuedRequestIds(ids => [...new Set([...ids, currentRequest.id])]);
+      } catch (caught) {
+        setSubmitError(caught instanceof Error ? caught.message : "Could not submit to the waiting list.");
+      } finally { setSubmitting(false); }
+      return;
+    }
+    if (presentation && (selectedFiles.length !== 1 || quantity !== "1" || !/\.(stl|obj)$/i.test(selectedFiles[0]?.name ?? ""))) {
+      setStepError("For the automated presentation, choose one STL or OBJ model and one copy.");
       return;
     }
     const invalidStep = firstInvalidStep(draft);
     if (invalidStep !== null) {
       setStepError(validateQuoteStep(invalidStep, draft));
-      setStep(invalidStep);
       return;
     }
     if (
@@ -478,9 +453,11 @@ export function QuoteRequestPanel() {
     );
 
     try {
+      const uploadFiles: File[] = [];
+      for (const file of selectedFiles) uploadFiles.push(await configuredModel(file, model));
       const cookieString = document.cookie;
       const quote = await createQuoteRequest(
-        crypto.randomUUID(),
+        submissionId(),
         cookieString,
         {
           quantity: Number(quantity),
@@ -491,8 +468,8 @@ export function QuoteRequestPanel() {
         },
       );
 
-      for (let index = 0; index < selectedFiles.length; index += 1) {
-        const file = selectedFiles[index];
+      for (let index = 0; index < uploadFiles.length; index += 1) {
+        const file = uploadFiles[index];
         updateProgress(index, "hashing");
         const sha256 = await computeFileSha256(file);
 
@@ -500,7 +477,7 @@ export function QuoteRequestPanel() {
         const intent = await issueModelUpload(
           quote.id,
           {
-            clientToken: crypto.randomUUID(),
+            clientToken: submissionId(),
             filename: file.name,
             sizeBytes: file.size,
             sha256,
@@ -529,7 +506,7 @@ export function QuoteRequestPanel() {
 
       const submitted = await submitQuoteRequest(quote.id, cookieString);
       setCompletedQuote(submitted);
-      setSelectedFiles([]);
+      setPreparedKey(configurationKey);
       void refreshRecent();
     } catch (caught) {
       setSubmitError(
@@ -577,594 +554,26 @@ export function QuoteRequestPanel() {
 
   return (
     <div className={styles.panel}>
-      {completedQuote ? (
-        <section className={styles.successPanel} aria-label="Request submitted">
-          <UiIcon name="check" />
-          <h2 ref={successHeading} tabIndex={-1}>
-            Your models are in for review.
-          </h2>
-          <p>
-            No payment has been taken. Your quotation will appear in your dashboard.
-          </p>
-          <ol>
-            <li>We check and slice your models.</li>
-            <li>
-              The owner reviews the estimate and issues a final quotation.
-            </li>
-            <li>You review the final price, accept and continue to payment.</li>
-          </ol>
-          <div className={styles.wizardActions}>
-            <a
-              className={styles.submitLink}
-              href={`#request-${completedQuote.id}`}
-            >
-              View status
-            </a>
-            <Link href="/orders">Go to your dashboard</Link>
-            <button
-              type="button"
-              onClick={() => {
-                setCompletedQuote(null);
-                setStep(0);
-                setProgress([]);
-                setQuantity("1");
-                setBuyerNotes("");
-                setFulfillmentMode("pickup");
-                setPreviewIndex(0);
-                setModelStats(null);
-                movedStep.current = true;
-              }}
-            >
-              Start another request
-            </button>
-          </div>
-        </section>
-      ) : (
-        <form className={styles.builder} onSubmit={handleSubmit} noValidate>
-          <aside
-            className={styles.previewColumn}
-            aria-label="Your models and specification"
-          >
-            <div className={styles.field}>
-              <label className={styles.label} htmlFor="model-files">
-                Model files
-              </label>
-              <div
-                className={styles.dropzone}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  if (!submitting && event.dataTransfer.files.length)
-                    selectFiles(Array.from(event.dataTransfer.files));
-                }}
-              >
-                <UiIcon name="upload" />
-                <strong>Choose model files</strong>
-                <span>or drop them here</span>
-                <input
-                  className={styles.fileInput}
-                  id="model-files"
-                  type="file"
-                  multiple
-                  accept={ACCEPT_ATTRIBUTE}
-                  onChange={handleFilesSelected}
-                  disabled={submitting}
-                />
-              </div>
-              <p className={styles.help}>
-                STL, 3MF, OBJ, STEP or STP. Up to {MAX_MODEL_FILES_PER_QUOTE}{" "}
-                files, {MAX_FILE_MIB} MiB each. All files use the print settings
-                selected below.
-              </p>
-            </div>
-            {selectedFiles[previewIndex] ? (
-              <ModelPreview
-                key={`${selectedFiles[previewIndex].name}-${selectedFiles[previewIndex].lastModified}`}
-                file={selectedFiles[previewIndex]}
-                onStats={setModelStats}
-                colour={swatchColour(colour)}
-              />
-            ) : (
-              <div className={styles.previewEmpty}>
-                <UiIcon name="cube" />
-                <p>Your model preview appears here.</p>
-                <small>
-                  Preview available for STL and OBJ files.
-                </small>
-              </div>
-            )}
-            {modelStats ? (
-              <p className={styles.help}>
-                {modelStats.dimensionsMm
-                  .map((value) => value.toFixed(1))
-                  .join(" × ")}{" "}
-                mm · approximate; fit is confirmed during review.
-              </p>
-            ) : null}
-            {selectedFiles.length > 0 ? (
-              <ul className={styles.fileList} aria-live="polite">
-                {selectedFiles.map((file, index) => (
-                  <li className={styles.fileRow} key={`${file.name}-${index}`}>
-                    <span className={styles.fileName}>
-                      {file.name}
-                      <small>{formatBytes(file.size)}</small>
-                    </span>
-                    <button
-                      type="button"
-                      aria-label={`Preview ${file.name}`}
-                      aria-pressed={previewIndex === index}
-                      disabled={submitting}
-                      onClick={() => {
-                        setPreviewIndex(index);
-                        setModelStats(null);
-                      }}
-                    >
-                      Preview
-                    </button>
-                    {progress[index] ? (
-                      <span className={styles.fileStatus}>
-                        {progressLabel(progress[index].status)}
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={submitting}
-                        aria-label={`Remove ${file.name}`}
-                        onClick={() => handleRemoveFile(index)}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            <div className={styles.liveSummary}>
-              <p className={styles.label}>Your print specification</p>
-              {selectedPreset ? (
-                <PrintSpecificationSummary
-                  value={{
-                    presetCode: selectedPreset.code,
-                    presetLabel: selectedPreset.label,
-                    materialCode: selectedPreset.materialCode,
-                    profileSha256: selectedPreset.profileSha256,
-                    colour: colour || null,
-                    settings: selectedPreset.settings,
-                  }}
-                />
-              ) : (
-                <p className={styles.help}>
-                  Only configured, priced print profiles can be ordered.
-                </p>
-              )}
-              <p className={styles.help}>
-                {selectedFiles.length}{" "}
-                {selectedFiles.length === 1 ? "model file" : "model files"} ·{" "}
-                {quantity || "—"} {quantity === "1" ? "copy" : "copies"}{" "}
-                each · {DELIVERY[fulfillmentMode]}
-              </p>
-            </div>
-          </aside>
-          <div className={styles.controls}>
-            <ol className={styles.stepper} aria-label="Request steps">
-              {STEPS.map((label, index) => (
-                <li key={label}>
-                  <button
-                    type="button"
-                    aria-current={step === index ? "step" : undefined}
-                    disabled={submitting}
-                    onClick={() => moveStep(index)}
-                  >
-                    <span>
-                      {index < step ? <UiIcon name="check" /> : index + 1}
-                    </span>
-                    {label}
-                  </button>
-                </li>
-              ))}
-            </ol>
-            <div className={styles.stepHeading}>
-              <p className={styles.label}>
-                Step {step + 1} of {STEPS.length}
-              </p>
-              <h2 ref={stepHeading} tabIndex={-1}>
-                {
-                  [
-                    "Start with your model.",
-                    "Make it your print.",
-                    "How will you receive it?",
-                    "Check everything before sending.",
-                  ][step]
-                }
-              </h2>
-            </div>
-            {step === 0 ? (
-              <div className={styles.modelGuide}>
-                <p>
-                  Add your files, then choose one print setting for all models in this request.
-                </p>
-                <ul>
-                  <li>
-                    Use millimetres for STL and OBJ. Dimensions are preserved.
-                  </li>
-                  <li>
-                    Preview orbit changes only your view, not the printed
-                    orientation.
-                  </li>
-                  <li>
-                    We check printability and fit before issuing a final price.
-                  </li>
-                </ul>
-              </div>
-            ) : null}
-            {step === 1 ? (
-              <>
-                <fieldset
-                  className={styles.printOptions}
-                  disabled={submitting || catalogueLoading}
-                >
-                  <legend>Choose your print</legend>
-                  {catalogueLoading ? (
-                    <p role="status">
-                      Loading available materials and print settings…
-                    </p>
-                  ) : null}
-                  {catalogueError ? (
-                    <p role="alert">
-                      {catalogueError}{" "}
-                      <button
-                        type="button"
-                        onClick={() => window.location.reload()}
-                      >
-                        Try again
-                      </button>
-                    </p>
-                  ) : null}
-                  {!catalogueLoading &&
-                  !catalogueError &&
-                  presets.length === 0 ? (
-                    <p role="status">
-                      The owner is configuring print options and prices.
-                      Ordering opens when those are ready.
-                    </p>
-                  ) : null}
-                  {selectedPreset ? (
-                    <>
-                      <fieldset className={styles.choices}>
-                        <legend>Material</legend>
-                        {Array.from(
-                          new Set(presets.map((preset) => preset.materialCode)),
-                        ).map((code) => (
-                          <label key={code} className={styles.choice}>
-                            <input
-                              type="radio"
-                              name="material"
-                              checked={selectedPreset.materialCode === code}
-                              onChange={() => {
-                                const next = presets.find(
-                                  (preset) => preset.materialCode === code,
-                                );
-                                setPresetCode(next?.code ?? "");
-                                setColour(next?.colours[0] ?? "");
-                              }}
-                            />
-                            {
-                              presets.find(
-                                (preset) => preset.materialCode === code,
-                              )?.settings.filamentType
-                            }
-                          </label>
-                        ))}
-                      </fieldset>
-                      <fieldset className={styles.choices}>
-                        <legend>Quality & infill</legend>
-                        {presets
-                          .filter(
-                            (preset) =>
-                              preset.materialCode ===
-                              selectedPreset.materialCode,
-                          )
-                          .map((preset) => (
-                            <label
-                              className={styles.presetChoice}
-                              key={preset.code}
-                            >
-                              <input
-                                type="radio"
-                                name="profile"
-                                checked={presetCode === preset.code}
-                                onChange={() => {
-                                  setPresetCode(preset.code);
-                                  setColour(preset.colours[0] ?? "");
-                                }}
-                              />
-                              <span>
-                                <strong>{preset.label}</strong>
-                                <small>
-                                  {preset.settings.layerHeightMm} mm layers ·{" "}
-                                  {preset.settings.infillPercent}% infill ·{" "}
-                                  {preset.settings.wallLoops} walls
-                                  <br />
-                                  {preset.settings.nozzleDiameterMm} mm nozzle ·
-                                  supports{" "}
-                                  {preset.settings.supports ? "on" : "off"}
-                                </small>
-                              </span>
-                            </label>
-                          ))}
-                      </fieldset>
-                      <p className={styles.help}>
-                        Each profile sets quality, infill, walls and supports together.
-                      </p>
-                      {selectedPreset.colours.length ? (
-                        <>
-                          <fieldset className={styles.choices}>
-                            <legend>Filament colour</legend>
-                            {selectedPreset.colours.map((option) => (
-                              <label key={option} className={styles.choice}>
-                                <input
-                                  type="radio"
-                                  name="colour"
-                                  value={option}
-                                  checked={colour === option}
-                                  onChange={() => setColour(option)}
-                                />
-                                {option}
-                              </label>
-                            ))}
-                          </fieldset>
-                        </>
-                      ) : (
-                        <p className={styles.help}>
-                          The owner will confirm the loaded filament colour
-                          before printing.
-                        </p>
-                      )}
-                      <PrintSpecificationSummary
-                        value={{
-                          presetCode: selectedPreset.code,
-                          presetLabel: selectedPreset.label,
-                          materialCode: selectedPreset.materialCode,
-                          profileSha256: selectedPreset.profileSha256,
-                          colour: colour || null,
-                          settings: selectedPreset.settings,
-                        }}
-                      />
-                      <p className={styles.help}>
-                        These settings are used together for slicing. Model
-                        dimensions are preserved; use millimetres for STL and
-                        OBJ. Colour is loaded and checked by the owner.
-                      </p>
-                    </>
-                  ) : null}
-                </fieldset>
-                <div className={styles.field}>
-                  <label className={styles.label} htmlFor="model-quantity">
-                    Copies of each model
-                  </label>
-                  <div className={styles.quantity}>
-                    <button
-                      type="button"
-                      aria-label="One fewer copy"
-                      disabled={submitting || Number(quantity) <= 1}
-                      onClick={() =>
-                        setQuantity(
-                          String(Math.max(1, (Number(quantity) || 1) - 1)),
-                        )
-                      }
-                    >
-                      −
-                    </button>
-                    <input
-                      id="model-quantity"
-                      type="number"
-                      value={quantity}
-                      min={1}
-                      max={100}
-                      required
-                      disabled={submitting}
-                      onChange={(event) => setQuantity(event.target.value)}
-                    />
-                    <button
-                      type="button"
-                      aria-label="One more copy"
-                      disabled={submitting || Number(quantity) >= 100}
-                      onClick={() =>
-                        setQuantity(
-                          String(Math.min(100, (Number(quantity) || 1) + 1)),
-                        )
-                      }
-                    >
-                      +
-                    </button>
-                  </div>
-                  <p className={styles.help}>
-                    1–100 copies of every model in this request.
-                  </p>
-                </div>
-              </>
-            ) : null}
-            {step === 2 ? (
-              <div className={styles.field}>
-                <label className={styles.label} htmlFor="fulfillment-mode">
-                  Fulfilment
-                </label>
-                <select
-                  id="fulfillment-mode"
-                  value={fulfillmentMode}
-                  disabled={submitting}
-                  onChange={(event) =>
-                    setFulfillmentMode(
-                      event.target.value as typeof fulfillmentMode,
-                    )
-                  }
-                >
-                  <option value="pickup">Pickup</option>
-                  <option value="local_delivery">Local delivery</option>
-                  <option value="shipping">Pan-India shipping</option>
-                </select>
-                <p className={styles.help}>
-                  Any charge appears in your quotation; the address is requested
-                  when you accept.
-                </p>
-                <label className={styles.label} htmlFor="buyer-notes">
-                  Requirements (optional)
-                </label>
-                <textarea
-                  id="buyer-notes"
-                  value={buyerNotes}
-                  maxLength={1000}
-                  disabled={submitting}
-                  onChange={(event) => setBuyerNotes(event.target.value)}
-                />
-                <p className={styles.help}>
-                  {buyerNotes.length}/1000 characters
-                </p>
-                <p className={styles.help}>
-                  Notes do not change the selected print settings. The owner
-                  must confirm any special requirement in the quotation.
-                </p>
-              </div>
-            ) : null}
-            {step === 3 ? (
-              <div className={styles.review}>
-                <section>
-                  <div>
-                    <h3>Models</h3>
-                    <button
-                      type="button"
-                      disabled={submitting}
-                      onClick={() => moveStep(0)}
-                    >
-                      Edit models
-                    </button>
-                  </div>
-                  <ul>
-                    {selectedFiles.map((file, index) => (
-                      <li key={`${file.name}-${index}`}>
-                        {file.name} · {formatBytes(file.size)}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-                <section>
-                  <div>
-                    <h3>Print options</h3>
-                    <button
-                      type="button"
-                      disabled={submitting}
-                      onClick={() => moveStep(1)}
-                    >
-                      Edit print options
-                    </button>
-                  </div>
-                  <p>
-                    {selectedPreset?.label} ·{" "}
-                    {colour || "Colour confirmed by owner"} · {quantity}{" "}
-                    {quantity === "1" ? "copy" : "copies"} each
-                  </p>
-                  <p className={styles.help}>
-                    {selectedPreset?.settings.layerHeightMm} mm layers ·{" "}
-                    {selectedPreset?.settings.infillPercent}% infill · supports{" "}
-                    {selectedPreset?.settings.supports ? "on" : "off"}
-                  </p>
-                </section>
-                <section>
-                  <div>
-                    <h3>Delivery & requirements</h3>
-                    <button
-                      type="button"
-                      disabled={submitting}
-                      onClick={() => moveStep(2)}
-                    >
-                      Edit delivery
-                    </button>
-                  </div>
-                  <p>{DELIVERY[fulfillmentMode]}</p>
-                  <p className={styles.notes}>
-                    {buyerNotes || "No special requirements added."}
-                  </p>
-                </section>
-                <div className={styles.priceExplanation}>
-                  <strong>A reviewed price, before you pay.</strong>
-                  <p>
-                    We check and slice each model, then issue a final quotation with
-                    the print price, any adjustment, delivery charge and tax.
-                  </p>
-                  <p>
-                    Submitting is free. You pay only after accepting the quotation.
-                    Your files stay private.
-                  </p>
-                </div>
-              </div>
-            ) : null}
-            {selectionErrors.length > 0 && (
-              <ul className={styles.errorList} role="alert">
-                {selectionErrors.map((message) => (
-                  <li key={message}>{message}</li>
-                ))}
-              </ul>
-            )}
-
-            {stepError ? (
-              <p role="alert" className={styles.error}>
-                {stepError}
-              </p>
-            ) : null}
-            {submitError && (
-              <p className={styles.error} role="alert">
-                {submitError} We could not confirm submission. Check recent
-                requests before trying again.
-              </p>
-            )}
-
-            {submitting ? (
-              <p role="status">
-                File{" "}
-                {Math.min(
-                  progress.findIndex(
-                    (entry) => entry.status !== "quarantined",
-                  ) + 1 || selectedFiles.length,
-                  selectedFiles.length,
-                )}{" "}
-                of {selectedFiles.length} · uploading and checking your request…
-              </p>
-            ) : null}
-            <div className={styles.wizardActions}>
-              {step > 0 ? (
-                <button
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => moveStep(step - 1)}
-                >
-                  Back
-                </button>
-              ) : null}
-              <button
-                className={styles.submit}
-                type="submit"
-                disabled={submitting}
-              >
-                {submitting
-                  ? "Submitting…"
-                  : step === 3
-                    ? "Submit for review"
-                    : "Continue"}
-              </button>
-            </div>
-            <p className={styles.help}>
-              No charge until you accept a final quotation and complete payment.
-            </p>
-          </div>
-        </form>
-      )}
+      <CustomPrintBuilder
+        files={selectedFiles} onFiles={selectFiles} onRemove={handleRemoveFile}
+        presets={presets} preset={selectedPreset} onPreset={setPresetCode}
+        colour={colour} onColour={setColour} quantity={quantity} onQuantity={setQuantity}
+        delivery={fulfillmentMode} onDelivery={setFulfillmentMode} notes={buyerNotes} onNotes={setBuyerNotes}
+        model={model} onModel={setModel} pending={submitting} estimating={estimating}
+        prepared={prepared} estimatePaise={currentRequest?.latestEstimate?.totalPaise ?? null}
+        durationSeconds={currentRequest?.latestEstimate?.durationSeconds ?? null}
+        presentation={presentation} queued={queuedKey === configurationKey}
+        error={submitError ?? stepError ?? selectionErrors[0] ?? null}
+        status={submitting ? progress.map(item => `${item.name}: ${progressLabel(item.status)}`).join(" · ") : prepared ? presentation ? queuedKey === configurationKey ? "Submitted to the owner waiting list." : "Your estimate is ready. Submit this model when you are ready." : "Your request is saved. The owner will confirm the final quotation." : ""}
+        catalogueLoading={catalogueLoading} catalogueError={catalogueError} onSubmit={handleSubmit}
+      />
 
       <section
         className={styles.recent}
         aria-label="Your recent quote requests"
       >
         <h2>Recent requests</h2>
-        <Link href="/orders">Review final quotations & orders</Link>
+        <Link href="/orders">{presentation ? "View my waiting-list submissions & prints" : "Review final quotations & orders"}</Link>
         {recentLoading && (
           <p className={styles.status}>Loading recent requests…</p>
         )}
@@ -1196,7 +605,7 @@ export function QuoteRequestPanel() {
                   </span>
                 </div>
                 <p className={styles.help}>
-                  {item.status === "quoted" ? (
+                  {!presentation && item.status === "quoted" ? (
                     <Link href="/orders#quotations">
                       Review your final quotation in your dashboard.
                     </Link>
@@ -1204,7 +613,7 @@ export function QuoteRequestPanel() {
                     item.status === "rejected" ? (
                     "Read the review details below before preparing another request."
                   ) : (
-                    "The owner will issue a final quotation after model checks and analysis."
+                    presentation ? "Your measured estimate is shown below. Submit it to the waiting list from the review panel above." : "The owner will issue a final quotation after model checks and analysis."
                   )}
                 </p>
                 <PrintSpecificationSummary value={item.printSpecification} />
@@ -1230,14 +639,29 @@ export function QuoteRequestPanel() {
                 {item.latestEstimate && (
                   <div className={styles.analysis}>
                     <p className={styles.analysisSummary}>
-                      Estimated total:{" "}
+                      {presentation ? "Reference printing cost: " : "Estimated total: "}
                       {formatInr(item.latestEstimate.totalPaise)}
                     </p>
                     <p className={styles.help}>
-                      {item.latestEstimate.materialName} · valid until{" "}
-                      {formatDate(item.latestEstimate.expiresAt)} · final
-                      approval still required
+                      {presentation
+                        ? `Free presentation · ${Math.ceil(item.latestEstimate.durationSeconds / 60)} min estimated print time`
+                        : `${item.latestEstimate.materialName} · valid until ${formatDate(item.latestEstimate.expiresAt)} · final approval still required`}
                     </p>
+                    {presentation && (queuedRequestIds.includes(item.id) ? (
+                      <Link href="/orders">View in my print queue →</Link>
+                    ) : item.assets.length === 1 && item.quantity === 1 &&
+                      /\.(stl|obj)$/i.test(item.assets[0].filename) && (
+                      <button type="button" disabled={Boolean(queueingRequest)} onClick={async () => {
+                        setQueueingRequest(item.id); setSubmitError(null);
+                        try {
+                          await joinPresentationQueue(item);
+                          setQueuedRequestIds(ids => [...new Set([...ids, item.id])]);
+                          if (item.id === currentRequest?.id) setQueuedKey(configurationKey);
+                        } catch (caught) {
+                          setSubmitError(caught instanceof Error ? caught.message : "Could not submit this model.");
+                        } finally { setQueueingRequest(null); }
+                      }}>{queueingRequest === item.id ? "Submitting…" : "Submit to waiting list →"}</button>
+                    ))}
                   </div>
                 )}
                 {item.ownerRejectionReason ? (

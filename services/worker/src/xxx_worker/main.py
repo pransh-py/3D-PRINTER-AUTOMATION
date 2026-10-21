@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from argparse import ArgumentParser
 from asyncio import create_task, gather, run, sleep
 from os import getpid
 from socket import gethostname
 
 from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import ResponseError
+from redis.exceptions import TimeoutError as RedisTimeoutError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from xxx_api.config import Settings, get_settings
 from xxx_api.database import create_database_engine, create_session_factory
 from xxx_api.email import SmtpEmailSender
@@ -23,10 +28,45 @@ from xxx_worker.orchestrator import (
     DeliveryDisposition,
     dispatch_analysis_outbox,
 )
-from xxx_worker.queue import AnalysisQueue
+from xxx_worker.queue import AnalysisQueue, AnalysisQueueMessage
 from xxx_worker.sandbox import SandboxValidator
 
 QUEUE_BLOCK_MS = 1000
+LOG = logging.getLogger(__name__)
+
+
+async def consume_analysis(
+    queue: AnalysisQueue,
+    sessions: async_sessionmaker[AsyncSession],
+    orchestrator: AnalysisOrchestrator,
+    settings: Settings,
+    *,
+    once: bool,
+) -> AnalysisQueueMessage | None:
+    """Recover transient queue reads without losing durable outbox or analysis state."""
+    try:
+        await queue.ensure_group()
+        await dispatch_analysis_outbox(sessions, queue)
+        message = await queue.reclaim_stale(minimum_idle_ms=settings.analysis_lease_seconds * 1_000)
+        if message is None:
+            message = await queue.read_new(block_ms=100 if once else QUEUE_BLOCK_MS)
+        if message is not None:
+            disposition = await orchestrator.process(message)
+            if disposition is DeliveryDisposition.ACKNOWLEDGE:
+                await queue.acknowledge(message)
+        return message
+    except (RedisConnectionError, RedisTimeoutError):
+        if once:
+            raise
+        LOG.warning("Analysis queue temporarily unavailable; retrying durable work.")
+        await sleep(1)
+        return None
+    except ResponseError as error:
+        if once or not str(error).startswith("NOGROUP"):
+            raise
+        LOG.warning("Analysis consumer group needs recovery; retrying durable work.")
+        await sleep(1)
+        return None
 
 
 def create_worker_redis(settings: Settings) -> Redis:
@@ -86,14 +126,17 @@ async def _run_worker(*, once: bool) -> None:
             await sleep(5)
 
     # Provider network latency must not block upload analysis or production outbox draining.
-    payments = create_task(payment_loop()) if settings.razorpay_enabled and not once else None
+    payments = (
+        create_task(payment_loop())
+        if settings.razorpay_enabled and not settings.presentation_mode and not once
+        else None
+    )
     notices = (
         create_task(notification_loop())
         if settings.workflow_notifications_enabled and not once
         else None
     )
     try:
-        await queue.ensure_group()
         while True:
             if payments is not None and payments.done():
                 payments.result()  # Unexpected failures are surfaced; never silently lose recovery.
@@ -101,20 +144,15 @@ async def _run_worker(*, once: bool) -> None:
                 notices.result()
             if once:
                 await notification_pass()
-                await reconcile_pending(sessions, settings, HttpRazorpayGateway(settings), limit=1)
+                if not settings.presentation_mode:
+                    await reconcile_pending(
+                        sessions, settings, HttpRazorpayGateway(settings), limit=1
+                    )
             async with sessions() as session:
-                await enqueue_paid_orders(session)
+                if not settings.presentation_mode:
+                    await enqueue_paid_orders(session)
                 await create_pending_estimates(session)
-            await dispatch_analysis_outbox(sessions, queue)
-            message = await queue.reclaim_stale(
-                minimum_idle_ms=settings.analysis_lease_seconds * 1_000
-            )
-            if message is None:
-                message = await queue.read_new(block_ms=100 if once else QUEUE_BLOCK_MS)
-            if message is not None:
-                disposition = await orchestrator.process(message)
-                if disposition is DeliveryDisposition.ACKNOWLEDGE:
-                    await queue.acknowledge(message)
+            message = await consume_analysis(queue, sessions, orchestrator, settings, once=once)
             if once:
                 return
             if message is None:

@@ -44,9 +44,7 @@ def read_config(path: Path) -> ConnectorConfig:
     if path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077:
         raise ValueError("Use a private regular connector file (mode 600).")
     config = ConnectorConfig.model_validate_json(path.read_bytes())
-    ManualBridge(
-        config.api_origin
-    )  # Validate HTTPS / loopback and credential destination.
+    ManualBridge(config.api_origin)  # Validate HTTPS / loopback and credential destination.
     return config
 
 
@@ -64,20 +62,20 @@ def save_config(path: Path, config: ConnectorConfig) -> None:
 
 
 class CommerceConnector:
+    job_kind = "commerce"
+    dispatch_path = "/api/v1/bridge/dispatches"
+    heartbeat_path = "/api/v1/bridge/heartbeat"
+
     def __init__(self, station: Station, config: ConnectorConfig, *, api=None):
         self.station = station
         self.config = config
-        self.api = api or ManualBridge(
-            config.api_origin, config.credential.get_secret_value()
-        )
+        self.api = api or ManualBridge(config.api_origin, config.credential.get_secret_value())
 
     async def request(self, path, body=None, *, binary=False):
         return await asyncio.to_thread(self.api.request, path, body, binary=binary)
 
     def imported(self):
-        return [
-            row for row in self.station.journal.all() if row.get("kind") == "commerce"
-        ]
+        return [row for row in self.station.journal.all() if row.get("kind") == self.job_kind]
 
     def queue_event(self, job_id, state, *, refusal=None):
         row = self.station.journal.get(job_id)
@@ -116,7 +114,7 @@ class CommerceConnector:
                 return not row.get("telemetry_error")
             try:
                 await self.request(
-                    f"/api/v1/bridge/dispatches/{row['authorization_id']}/events",
+                    f"{self.dispatch_path}/{row['authorization_id']}/events",
                     row["outbox"][0],
                 )
             except HTTPError as error:
@@ -137,14 +135,12 @@ class CommerceConnector:
         identifier = str(UUID(authorization_id))
         with self.station.journal.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            existing = db.execute(
-                "SELECT data FROM jobs WHERE token=?", (identifier,)
-            ).fetchone()
+            existing = db.execute("SELECT data FROM jobs WHERE token=?", (identifier,)).fetchone()
             if existing:
                 return json.loads(existing[0]), False
             row = {
                 "id": uuid4().hex,
-                "kind": "commerce",
+                "kind": self.job_kind,
                 "authorization_id": identifier,
                 "commerce_job_id": str(UUID(commerce_job_id)),
                 "phase": "validating",
@@ -211,10 +207,7 @@ class CommerceConnector:
             ("filament_colour", mapping.colour_hex),
         ):
             values = re.findall(rf"^; {field} = ([^\r\n]+)\r?$", text, re.MULTILINE)
-            if (
-                len(values) != 1
-                or values[0].strip().casefold() != str(expected).casefold()
-            ):
+            if len(values) != 1 or values[0].strip().casefold() != str(expected).casefold():
                 raise ValueError("gcode_metadata_mismatch")
         return options, mapping
 
@@ -223,7 +216,7 @@ class CommerceConnector:
         current = self.station.journal.get(job_id)
         if current.get("start_intent") or current["phase"] != "validating":
             return  # Only a newly reserved row may ever reach the physical boundary.
-        prefix = f"/api/v1/bridge/dispatches/{row['authorization_id']}"
+        prefix = f"{self.dispatch_path}/{row['authorization_id']}"
         try:
             claim = await self.request(prefix + "/claim", {})
             if (
@@ -253,7 +246,7 @@ class CommerceConnector:
                 stream.write(raw)
             destination = scratch / "zmod.gcode"
             wire_hash = await asyncio.to_thread(
-                prepare_zmod_gcode, source, destination, material=options.material
+                self.prepare_wire, source, destination, options, mapping
             )
             driver = self.station.driver
             assert driver is not None
@@ -300,13 +293,11 @@ class CommerceConnector:
                 if physical
                 else "No printer command sent. Owner must review readiness and configuration.",
             )
-            self.queue_event(
-                job_id, "needs_attention" if physical else "refused", refusal=refusal
-            )
+            self.queue_event(job_id, "needs_attention" if physical else "refused", refusal=refusal)
         await self.flush(job_id)
 
     async def tick(self):
-        await self.request("/api/v1/bridge/heartbeat", {})
+        await self.request(self.heartbeat_path, {})
         for row in self.imported():
             phase = row["phase"]
             if row.get("start_intent") and phase in {
@@ -322,18 +313,14 @@ class CommerceConnector:
             elif phase == "failed" and not row.get("event_keys"):
                 # Recovery before intent: consume/recover the claim only to refuse it, never send.
                 try:
-                    await self.request(
-                        f"/api/v1/bridge/dispatches/{row['authorization_id']}/claim", {}
-                    )
-                    self.queue_event(
-                        row["id"], "refused", refusal="station_restarted_before_send"
-                    )
+                    await self.request(f"{self.dispatch_path}/{row['authorization_id']}/claim", {})
+                    self.queue_event(row["id"], "refused", refusal="station_restarted_before_send")
                 except (OSError, ValueError):
                     pass
             await self.flush(row["id"])
         if any(row["phase"] in ACTIVE for row in self.station.journal.all()):
             return
-        grants = await self.request("/api/v1/bridge/dispatches")
+        grants = await self.request(self.dispatch_path)
         for grant in grants["items"]:
             try:
                 row, created = self.reserve(grant["id"], grant["jobId"])
@@ -342,6 +329,9 @@ class CommerceConnector:
             if created:
                 await self.dispatch(row)
                 return
+
+    def prepare_wire(self, source, destination, options, mapping):
+        return prepare_zmod_gcode(source, destination, material=options.material)
 
     async def run(self):
         while True:

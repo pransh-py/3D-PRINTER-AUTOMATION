@@ -1,6 +1,7 @@
 """Validated application configuration."""
 
 from functools import lru_cache
+from ipaddress import IPv4Address, IPv4Network
 from os import environ
 from pathlib import Path
 from typing import Literal, cast
@@ -75,6 +76,7 @@ class Settings(BaseSettings):
     storage_endpoint_url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:9000")
     storage_backend: Literal["s3", "local"] = "s3"
     storage_local_directory: Path | None = None
+    storage_local_lan_origin: AnyHttpUrl | None = None
     storage_region: str = Field(default="us-east-1", min_length=1, max_length=64)
     storage_bucket: str = Field(
         default="xxx-private-models",
@@ -101,6 +103,7 @@ class Settings(BaseSettings):
     whatsapp_otp_timeout_seconds: float = Field(default=20, gt=0, le=30)
     workflow_notifications_enabled: bool = False
     printer_dispatch_enabled: bool = False
+    presentation_mode: bool = False
     notification_max_attempts: int = Field(default=5, ge=1, le=10)
     email_verification_ttl_hours: int = Field(default=24, ge=1, le=72)
     password_reset_ttl_minutes: int = Field(default=30, ge=10, le=60)
@@ -116,28 +119,68 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_production_safety(self) -> "Settings":
         """Refuse configuration that would weaken production boundaries."""
+        if self.presentation_mode and self.environment not in {"development", "test"}:
+            raise ValueError("free presentation mode is development/test-only")
         if self.whatsapp_otp_enabled:
             if self.environment == "production":
                 raise ValueError("local-only sender not approved for production")
             url = self.whatsapp_otp_sender_url
-            if (url.scheme != "http" or url.host != "127.0.0.1" or url.path not in {None, "/"}
-                    or url.username or url.password or url.query or url.fragment):
+            if (
+                url.scheme != "http"
+                or url.host != "127.0.0.1"
+                or url.path not in {None, "/"}
+                or url.username
+                or url.password
+                or url.query
+                or url.fragment
+            ):
                 raise ValueError("WhatsApp OTP requires a fixed loopback HTTP sender origin")
             key = self.whatsapp_otp_sender_api_key
-            if key is None or len(key.get_secret_value().encode()) < 32 or key in {
-                self.jwt_signing_secret, self.token_hash_secret, self.mfa_encryption_secret
-            }:
+            if (
+                key is None
+                or len(key.get_secret_value().encode()) < 32
+                or key
+                in {self.jwt_signing_secret, self.token_hash_secret, self.mfa_encryption_secret}
+            ):
                 raise ValueError("WhatsApp OTP requires a separate strong sender key")
+        lan_origin = None
+        if self.storage_local_lan_origin is not None:
+            origin = self.storage_local_lan_origin
+            if self.environment not in {"development", "test"} or self.storage_backend != "local":
+                raise ValueError("trusted LAN local storage is development/test-only")
+            try:
+                address = IPv4Address(origin.host or "")
+            except ValueError:
+                raise ValueError("trusted LAN storage requires an RFC1918 IPv4 origin") from None
+            if (
+                not any(
+                    address in IPv4Network(network)
+                    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+                )
+                or origin.scheme != "http"
+                or origin.path not in {None, "/"}
+                or origin.username
+                or origin.password
+                or origin.query
+                or origin.fragment
+            ):
+                raise ValueError("trusted LAN storage requires a plain RFC1918 HTTP origin")
+            lan_origin = str(origin).rstrip("/")
         if self.storage_backend == "local":
             if self.environment not in {"development", "test"}:
                 raise ValueError("local model storage is only for development/test")
             if not self.storage_local_directory or not self.storage_local_directory.is_absolute():
                 raise ValueError("local model storage requires an absolute private directory")
             loopback = {"127.0.0.1", "localhost", "::1", "[::1]"}
-            if self.public_web_url.host not in loopback or any(
-                AnyHttpUrl(origin).host not in loopback for origin in self.allowed_origins
-            ):
-                raise ValueError("local model storage requires loopback-only web origins")
+            for web_origin in [str(self.public_web_url), *self.allowed_origins]:
+                if (
+                    AnyHttpUrl(web_origin).host not in loopback
+                    and web_origin.rstrip("/") != lan_origin
+                ):
+                    raise ValueError(
+                        "local model storage requires loopback-only web origins "
+                        "or the explicit trusted LAN origin"
+                    )
             directory = self.storage_local_directory.resolve()
             if directory in {Path("/"), Path.home(), Path.cwd()} or "public" in directory.parts:
                 raise ValueError("local model storage requires a dedicated non-public directory")

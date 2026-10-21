@@ -1,5 +1,46 @@
 # `xxx` Product Requirements
 
+## Free presentation queue — October 21, 2026
+
+For the owner's explicitly requested presentation, payment is omitted entirely.
+Model analysis produces a reference manufacturing cost and slicer print duration;
+the customer explicitly submits that measured configuration to an owner waiting
+list. Owner admission moves it to a FIFO work queue. Neither the estimate nor
+admission fabricates a payment or uses the paid-commerce order workflow. This
+separate development/test mode retains all existing commercial records.
+
+The local service sends admitted jobs once, only when the printer is ready and
+the owner has confirmed the installed, clear plate, correct material/nozzle and
+supervision for that next job. Completed parts are removed manually: completion
+consumes all clearance, so the following job needs a fresh owner clearance.
+The service never assumes an idle printer has an empty bed. Ambiguous starts and
+telemetry failures hold the queue; no automatic physical retry is permitted.
+Automatic presentation dispatch supports one validated STL/OBJ and one copy per
+request, matching the commissioned single-tool station. Other cases require review.
+
+## Restored model configurator — October 21, 2026
+
+The buyer request page uses the preview and accordion layout from `d826901`, while
+retaining buyer login, private quote requests, owner review and final-quotation
+acceptance. Controls include the configured material/colours, 0.20/0.15/0.10 mm
+layers, the existing 10–90% infill choices, supports and quantity. The inline
+estimate comes from the saved request's actual slicing results; changing a file
+or setting invalidates that displayed estimate. This page does not directly start
+the printer or expose the operator station API.
+
+Custom combinations select an exact hash-pinned catalogue entry. The compilation
+tool preserves the base entry and produces 60 variants by changing only layer
+height, infill and support enablement. Other machine, filament and process values
+are retained. The original station's profiles/approvals are not changed, and new
+commerce variants do not gain physical-dispatch approval automatically.
+
+Units and applied X-then-Y rotation are available for previewable STL/OBJ files
+up to 16 MiB. A configured mesh is exported as `*-configured.stl` before normal
+authenticated upload; its bytes, checksum, dimensions and slicing are validated
+by the server. Unchanged uploads retain their original bytes. Other supported
+formats retain their existing orientation and units; the UI disables unsupported
+transformations. Model files remain private and payment awaits a final quotation.
+
 ## Ordering workflow polish — October 21, 2026
 
 The buyer journey uses a guided model → approved print options → delivery → review request,

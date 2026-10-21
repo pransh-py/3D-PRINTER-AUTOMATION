@@ -7,7 +7,6 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 from test_quotes_http import PASSWORD, _build_app
-
 from xxx_api.config import Settings
 from xxx_api.database import get_session
 from xxx_api.domain.quotes import ModelAssetStatus
@@ -93,6 +92,43 @@ def test_local_storage_cannot_be_enabled_for_staging_or_public_web(tmp_path):
                 storage_backend="local",
                 storage_local_directory=tmp_path,
                 public_web_url=origin,
+            )
+
+
+def test_trusted_lan_storage_is_explicit_and_scoped_to_one_origin(tmp_path):
+    base = dict(
+        _env_file=None,
+        environment="development",
+        storage_backend="local",
+        storage_local_directory=tmp_path / "lan-objects",
+        public_web_url="http://10.31.68.160:3100",
+        allowed_origins=["http://10.31.68.160:3100", "http://localhost:3100"],
+    )
+    with pytest.raises(ValueError, match="loopback-only"):
+        Settings(**base)
+    settings = Settings(**base, storage_local_lan_origin="http://10.31.68.160:3100")
+    assert LocalObjectStorage(settings).root == tmp_path / "lan-objects"
+    for origin in ["http://10.31.68.161:3100", "http://10.31.68.160:3101", "https://example.com"]:
+        with pytest.raises(ValueError, match="loopback-only"):
+            Settings(
+                **{**base, "allowed_origins": [origin]},
+                storage_local_lan_origin="http://10.31.68.160:3100",
+            )
+    for origin in [
+        "http://8.8.8.8:3100",
+        "http://localhost:3100",
+        "http://169.254.1.1:3100",
+        "http://10.31.68.160:3100/path",
+        "http://user@10.31.68.160:3100",
+        "http://10.31.68.160:3100/?x=1",
+    ]:
+        with pytest.raises(ValueError, match="RFC1918"):
+            Settings(**base, storage_local_lan_origin=origin)
+    for environment in ["staging", "production"]:
+        with pytest.raises(ValueError, match="development/test-only"):
+            Settings(
+                **{**base, "environment": environment},
+                storage_local_lan_origin="http://10.31.68.160:3100",
             )
 
 

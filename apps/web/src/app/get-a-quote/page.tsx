@@ -1,27 +1,26 @@
 import type { Metadata } from "next";
 import { QuoteRequestPanel } from "@/components/quotes/quote-request-panel";
 import { SiteHeader } from "@/components/site-header";
-import styles from "@/components/quotes/quote-request.module.css";
+import styles from "@/app/print/station.module.css";
 
 export const metadata: Metadata = {
   title: "Get a quote",
 };
 
 export default function GetAQuotePage() {
+  const presentation = process.env.PRINTFLOW_PRESENTATION_MODE === "1";
   return (
-    <>
-      <SiteHeader />
+    <div className={styles.shell}>
+      <SiteHeader presentation={presentation} />
       <main id="main-content" tabIndex={-1} className={styles.page}>
-        <header className={styles.intro}>
-          <p className={styles.label}>YOUR FILE. YOUR NEXT PRINT.</p>
-          <h1>Let’s make your model.</h1>
-          <p>
-            Upload, configure and review. We’ll check your models and send a
-            final price before you pay.
-          </p>
+        <header className={styles.title}>
+          <div>
+            <h1>Make it your own.</h1>
+            <p>Your model, your material, your next print.</p>
+          </div>
         </header>
-        <QuoteRequestPanel />
+        <QuoteRequestPanel presentation={presentation} />
       </main>
-    </>
+    </div>
   );
 }
