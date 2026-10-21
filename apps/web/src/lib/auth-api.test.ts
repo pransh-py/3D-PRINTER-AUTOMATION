@@ -10,7 +10,41 @@ import {
   readCsrfCookie,
   registerBuyer,
   startOwnerMfaEnrollment,
+  requestPhoneCode,
+  verifyPhoneCode,
+  toIndianMobileE164,
 } from "./auth-api.ts";
+
+test("Indian mobile input normalises to one canonical identity", () => {
+  assert.equal(toIndianMobileE164("90000 00001"), "+919000000001");
+  assert.equal(toIndianMobileE164("+91-90000-00001"), "+919000000001");
+  for (const value of ["123", "+15551234567", "09000000001", "5000000001", "９００００００００１"]) {
+    assert.equal(toIndianMobileE164(value), null);
+  }
+});
+
+test("phone codes use server challenges and phone-only sessions have no fake email", async () => {
+  const old = globalThis.fetch;
+  const challenge = "c".repeat(43);
+  try {
+    globalThis.fetch = async (url, init) => {
+      assert.equal(url, "/api/v1/auth/phone/request");
+      assert.deepEqual(JSON.parse(String(init?.body)), { phone: "+919000000001", purpose: "signup", displayName: "Buyer" });
+      return Response.json({ challenge, expiresInSeconds: 300, resendAfterSeconds: 60 }, { status: 202 });
+    };
+    assert.equal((await requestPhoneCode({ phone: "+919000000001", purpose: "signup", displayName: "Buyer" })).challenge, challenge);
+    globalThis.fetch = async (url, init) => {
+      assert.equal(url, "/api/v1/auth/phone/verify");
+      assert.deepEqual(JSON.parse(String(init?.body)), { challenge, code: "004219" });
+      return Response.json({ id: "buyer-id", email: null, phone: "+919000000001", displayName: "Buyer", role: "buyer" });
+    };
+    const user = await verifyPhoneCode(challenge, "004219");
+    assert.equal(user.email, null);
+    assert.equal(user.phone, "+919000000001");
+    globalThis.fetch = async () => Response.json({ challenge, expiresInSeconds: "300", resendAfterSeconds: 60 });
+    await assert.rejects(requestPhoneCode({ phone: "+919000000001", purpose: "login" }), /invalid response/);
+  } finally { globalThis.fetch = old; }
+});
 
 test("reads development and production CSRF cookie names", () => {
   assert.equal(readCsrfCookie("other=1; xxx_csrf=signed%3Avalue"), "signed:value");

@@ -1,0 +1,438 @@
+.overview {
+  display: grid;
+  gap: 24px;
+  padding: 12px 0 20px;
+}
+.overview :is(h2, h3, p) {
+  margin-top: 0;
+}
+.sectionHeading,
+.welcome {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: center;
+}
+.overview h2 {
+  margin: 5px 0 8px;
+  font-size: clamp(24px, 3vw, 32px);
+  line-height: 1.18;
+  letter-spacing: -0.9px;
+}
+.welcome p:last-child {
+  color: var(--muted);
+  margin-bottom: 0;
+  line-height: 1.5;
+}
+.kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  color: var(--link);
+  margin-bottom: 10px;
+}
+.timestamp,
+.footnote {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.timestamp {
+  white-space: nowrap;
+  margin-bottom: 0;
+}
+.overview .primary {
+  background: var(--orange);
+  color: #fff;
+  border-radius: 6px;
+  padding: 14px 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 20px;
+  font-size: 14px;
+  font-weight: 650;
+  flex-shrink: 0;
+}
+.info,
+.warning,
+.error {
+  padding: 15px 18px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+  background: var(--surface);
+}
+.warning {
+  border-left-color: var(--orange);
+}
+.error {
+  color: var(--link);
+}
+.warning a,
+.warning button,
+.empty a {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  font-weight: 600;
+}
+.overview .warning button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--link);
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+.overview .metrics button {
+  min-height: 140px;
+  padding: 22px;
+  display: grid;
+  text-align: left;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.metrics button:hover {
+  border-color: var(--orange);
+}
+.metrics span {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--muted);
+}
+.metrics strong {
+  font-size: 36px;
+  line-height: 1;
+  letter-spacing: -1px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.metrics small {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+  min-width: 0;
+}
+.panelHeading {
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.panelHeading h3 {
+  font-size: 16px;
+  letter-spacing: -0.25px;
+  margin: 0;
+}
+.panelHeading > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.overview .panelHeading button,
+.panelHeading a {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--link);
+}
+.tasks {
+  padding: 0 22px;
+}
+.overview .tasks button {
+  width: 100%;
+  padding: 17px 0;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 16px;
+  gap: 12px;
+  align-items: center;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  text-align: left;
+  background: transparent;
+}
+.tasks button:last-child {
+  border-bottom: 0;
+}
+.tasks strong,
+.records strong,
+.orderRows strong {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.tasks small,
+.records small,
+.orderRows small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 3px;
+}
+.count {
+  background: var(--soft);
+  font-size: 16px;
+  font-weight: 650;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.count[data-active="true"] {
+  color: var(--link);
+  border: 1px solid var(--orange);
+}
+.checklist,
+.records {
+  list-style: none;
+  padding: 0 22px;
+  margin: 0;
+}
+.checklist li,
+.records li {
+  padding: 17px 0;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+.checklist li:last-child,
+.records li:last-child {
+  border-bottom: 0;
+}
+.overview .checklist button {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  font-size: 13px;
+  text-align: left;
+  color: var(--link);
+}
+.badge {
+  font-size: 10px;
+  line-height: 1.5;
+  border-radius: 4px;
+  padding: 4px 7px;
+  background: var(--soft);
+  color: var(--muted);
+  text-transform: capitalize;
+  flex-shrink: 0;
+  max-width: 45%;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.badge[data-ready="true"] {
+  color: var(--ink);
+  border-left: 2px solid var(--muted);
+}
+.setupNote {
+  background: var(--soft);
+  padding: 20px 22px 8px;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.setupNote strong {
+  font-size: 13px;
+}
+.setupNote p {
+  color: var(--muted);
+  margin: 9px 0 13px;
+}
+.records li > div {
+  min-width: 0;
+}
+.overview button {
+  min-height: 44px;
+}
+.overview a:focus-visible,
+.overview button:focus-visible {
+  outline: 3px solid var(--link);
+  outline-offset: 4px;
+}
+.records li > span {
+  flex-shrink: 0;
+  max-width: 48%;
+}
+.records strong {
+  overflow-wrap: anywhere;
+}
+.overview .orderRows button {
+  padding: 17px 22px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  font-size: 13px;
+}
+.orderRows button:last-child {
+  border-bottom: 0;
+}
+.orderRows button > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.orderRows button > span:last-child {
+  white-space: nowrap;
+}
+.orderRows button:hover,
+.tasks button:hover {
+  color: var(--link);
+}
+.panelEmpty {
+  padding: 24px 22px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+  margin-bottom: 0;
+}
+.panelFootnote {
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  padding: 14px 22px;
+  margin-bottom: 0;
+}
+.requestSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  background: var(--soft);
+  padding: 14px 22px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.requestSummary strong {
+  color: var(--ink);
+}
+.empty {
+  padding: 28px;
+  background: var(--soft);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}
+.empty h3 {
+  font-size: 22px;
+  margin-bottom: 10px;
+}
+.empty p {
+  max-width: 600px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.empty a {
+  font-size: 14px;
+}
+.process {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 26px 0 4px;
+  margin: 0;
+  border-top: 1px solid var(--line);
+  gap: 24px;
+}
+.process span {
+  display: block;
+  color: var(--link);
+  font-size: 11px;
+  margin-bottom: 10px;
+  font-weight: 700;
+}
+.process strong {
+  font-size: 13px;
+}
+.process p {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--muted);
+  margin: 7px 0 0;
+}
+.footnote {
+  margin-bottom: 0;
+}
+@media (max-width: 900px) {
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 540px) {
+  .sectionHeading,
+  .welcome {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .metrics {
+    gap: 10px;
+  }
+  .overview .metrics button {
+    padding: 16px 12px;
+    min-height: 142px;
+  }
+  .metrics strong {
+    font-size: 31px;
+  }
+  .metrics small {
+    font-size: 10px;
+  }
+  .metrics span {
+    font-size: 12px;
+  }
+  .process {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 22px 14px;
+  }
+  .panelHeading,
+  .overview .orderRows button {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .tasks,
+  .checklist,
+  .records {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .empty {
+    padding: 22px;
+  }
+}

@@ -152,9 +152,8 @@ export function PaymentControls({
       </div>
       {enabled ? (
         <p>
-          After returning from Checkout, check payment status. If confirmation
-          is delayed, do not make another payment. A verified capture queues the
-          order once.
+          After paying, check payment status. If confirmation is delayed,
+          don’t pay again.
         </p>
       ) : null}
     </section>

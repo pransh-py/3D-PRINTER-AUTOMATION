@@ -12,6 +12,7 @@ from xxx_api.database import get_session
 from xxx_api.domain.roles import Role
 from xxx_api.email import EmailSender
 from xxx_api.models.identity import MfaMethod, User
+from xxx_api.phone_otp import PhoneOtpSender
 from xxx_api.rate_limit import RateLimiter
 from xxx_api.security.cookies import session_cookie_names
 from xxx_api.security.tokens import verify_csrf_token
@@ -33,6 +34,10 @@ def get_runtime_settings(request: Request) -> Settings:
 def get_email_sender(request: Request) -> EmailSender:
     """Return the application-lifetime transactional email adapter."""
     return request.app.state.email_sender
+
+
+def get_phone_otp_sender(request: Request) -> PhoneOtpSender:
+    return request.app.state.phone_otp_sender
 
 
 def get_rate_limiter(request: Request) -> RateLimiter:
@@ -89,6 +94,16 @@ async def get_current_user(principal: CurrentPrincipal) -> User:
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def require_buyer(principal: CurrentPrincipal) -> AuthenticatedPrincipal:
+    """Keep buyer-only workspaces separate from the primary owner's global view."""
+    if principal.user.role is not Role.BUYER:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Buyer access required")
+    return principal
+
+
+BuyerPrincipal = Annotated[AuthenticatedPrincipal, Depends(require_buyer)]
 
 
 async def require_owner(principal: CurrentPrincipal) -> AuthenticatedPrincipal:

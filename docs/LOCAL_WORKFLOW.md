@@ -1,5 +1,279 @@
 # Local order workflow and verification
 
+## Demo-ready order-to-station workflow — October 21, 2026
+
+This addendum supersedes earlier statements below that commerce printer dispatch is absent.
+It builds on GitHub/local main `d8269010530dc32fa5bb35d1642dc5ea46c79a98` and preserves the
+pre-existing uncommitted dashboard/workflow patch (`7b642f083895440d6195e5309f75d408580cb1f8e544488cfb8627f53669ec9d`).
+No commit, push, deployment, live payment or physical-printer request is part of this work.
+
+Demo tabs: buyer `http://localhost:3111/orders`, owner `http://127.0.0.1:3111/operations`.
+The different loopback hostnames keep their normal session cookies separate; this is not role
+impersonation. API 8032 uses a fresh disposable database, private storage, a separate Redis
+stream and the normal worker orchestration with real OrcaSlicer 2.4.2. Only the lab factory
+selects the fictional payment provider. Do not point it at a production database or printer.
+
+The browser walkthrough exercised public registration, SMTP verification, buyer sign-in,
+private cube upload/preview/configuration, real measured slicing, owner password/TOTP,
+quotation issue, buyer acceptance and server payment reconciliation. A lab-only driver creates
+Checkout through the normal authenticated API; no real Razorpay SDK is opened with fake keys.
+The owner then prepares, reviews/downloads the hash-verified G-code, confirms readiness and
+authorizes the paired **Lab simulator — not a printer**. The unchanged driver performs one
+loopback upload/start, and both dashboards receive printing progress. Simulator completion
+advances to QA; owner QA pass and recorded pickup complete the order. A paid two-copy order is
+explicitly ineligible for automatic sending. Another single-copy order is retained for rehearsal.
+
+Software E2E with a simulated printer and a fictional test provider. The new commerce bridge
+has not been tested on the physical AD5X. The physical proof is still the commissioned d826901
+native station. Rates, tax treatment and material profiles used by this lab are not approved
+business/physical-production settings. The demo catalogue deliberately offers only its red PLA
+simulator profile; other confirmed stock needs matching reviewed profile/colour metadata.
+
+Evidence is ignored under `.local/evidence/order-station/`: genuine before/after UI captures,
+test-first routing/API failures, reviewed G-code hash, real Orca results, API/database/journal
+evidence and the simulator's exact upload/start count. The first completed browser order and
+its original database remain preserved as `e2e-first.json`; final rehearsal state is separate.
+`demo-orders.json` identifies the current fictional orders. Private access credentials remain in
+the local file referenced by `active-lab.txt`, never in Git or screenshots.
+The final rehearsal (`e2e-final.json`, `handover-manual-final.json`) retains one completed
+automatic simulator order, one completed two-copy manual-record rehearsal and one paid
+single-copy order waiting in the queue. The final manual-record and pickup transitions were
+replayed through normal password/TOTP/Origin/CSRF-protected HTTP endpoints; they are not
+evidence that multiple copies were physically printed. The loopback simulator still records
+exactly one upload and one start. Only the owner can advance the remaining queued order.
+
+The consolidated Python checks passed 303 tests, including the two opt-in native Orca cases
+using a simulator-only configuration. Native UI regression uses the
+isolated `.next-station-verification` build and a fixed loopback test proxy; it never reaches the
+real station's 8123 port. `.next-print-station` and `.next-lan` are not built or replaced. Web
+checks include 64 tests, TypeScript and lint with only the pre-existing sign-out navigation warning.
+Protected source/runtime fingerprint manifests are recorded under `.local/opus/order-station/`.
+
+The final recovery check reproduced a new-adapter defect in disposable state: authorize an
+unclaimed grant, revoke the bridge, then request recovery with dispatch disabled. The early
+flag check and the old nonrevoked-only expiry query left the job stuck in `authorized`.
+`services/api/src/xxx_api/services/bridge.py` now conditionally cancels only an unclaimed/unconsumed grant before the
+job/order CAS, records a reset reason/audit/notice and retains the reservation in `preparing`.
+`authorization_reset_readiness_required` is a committed recovery response, not permission to
+send again. A fresh checklist is mandatory. A claimed grant cannot reset; the owner must inspect
+the attempt and use the existing noted-failure path. Four two-session claim/reset race runs had
+one transactional winner each. Rejected claims free the connector's local active slot without
+creating a send intent.
+
+The genuine service/database replay pair is `before/recovery-stuck.png` and
+`after/recovery-preparing.png`, with raw `recovery-{before,after}.json`. The ignored live probe
+source and its hash are retained; its business state/error values come from real service calls
+and database reads. Its zero-physical-command label describes the fixture's lack of any driver,
+not a measured hardware counter. The normal HTTP owner UI was separately exercised with normal
+password/TOTP, CSRF and Origin: a revoked unclaimed grant with dispatch disabled exposed
+**Return to readiness**, POST returned 409, and the panel reloaded the new version/checklist
+with the explicit cancellation notice. Captures are `after/recovery-ui-{before-click,preparing}.png`.
+These focused fixtures are not evidence of a live payment or print.
+The owner presentation is in `apps/web/src/components/workflow/workflow-panel.tsx`; local
+failed-claim recovery is in `services/bridge/commerce_connector.py`.
+
+For a fresh local demo on this already configured checkout:
+
+```sh
+PYTHONPATH=. .venv313/bin/uvicorn dispatch_lab:create_dispatch_lab --factory --app-dir services/api/tests --host 127.0.0.1 --port 8032
+API_INTERNAL_URL=http://127.0.0.1:8032 PRINTFLOW_WEB_VERIFICATION=1 npm --prefix apps/web run build
+API_INTERNAL_URL=http://127.0.0.1:8032 PRINTFLOW_WEB_VERIFICATION=1 npm --prefix apps/web run start -- --hostname 127.0.0.1 --port 3111
+```
+
+The test factory creates new state on every restart, invalidating previous lab cookies; sign in
+again. It requires the existing `.local/service/verification-preset` and reviewed local Orca
+binary, not a physical-printer configuration. The active demo is already running; do not restart
+it just before presenting. Owner-sensitive actions still require recent MFA. If it expires,
+reauthenticate normally from Account & security using the lab's authenticator details privately.
+
+### Activating the connector later, beside the actual printer
+
+**Not yet cleared for physical activation.** Final review approves the local software demo
+only. Before the commands below are used on the AD5X, resolve and verify three connector
+follow-ups: a noted owner-observed completion path when an automatic print loses telemetry;
+resilient connector-loop exception handling without secret-bearing exception text; and
+terminal rejection handling that stops repeated recovery claims after 401/404/409. The
+commissioned native station remains unchanged and separate. Local waiting on a busy station
+is deliberately conservative: the connector does not claim/send; the grant can expire and
+requires owner recovery/readiness. Display-only options are provisional until verification.
+The connector runner serves the local station API, not the station-mode web page.
+
+Do not change or reinitialize the commissioned station. Stop its original runner deliberately
+before switching runners; the shared lock rejects concurrent operation. In WSL/Linux/macOS,
+pair the connector using an owner-issued one-use token, then explicitly review each commerce
+bundle (including its declared plate/material/colour) and approve its exact hash:
+
+```sh
+.venv313/bin/python tools/run_commerce_station.py pair --api YOUR_HTTPS_API_OR_LOOPBACK_ORIGIN
+.venv313/bin/python tools/run_commerce_station.py approve-profile --directory ABSOLUTE_REVIEWED_BUNDLE --sha256 EXACT_BUNDLE_HASH --material PLA
+.venv313/bin/python tools/run_commerce_station.py run --enable-printer
+```
+
+Use the global `--station-directory` / `--connector-directory` options before the subcommand
+when paths differ from their defaults. Do not paste access codes, serial numbers, API keys or
+pairing tokens into chat. Enable server `PRINTER_DISPATCH_ENABLED` only for the supervised
+acceptance. Verify an empty bed, actual plate, correct mapped spool and supervision. The first
+real test must use a tiny known-safe model; no queued order starts merely because it is paid.
+
+## Guided buyer and owner workflows — October 21, 2026
+
+This polish builds on `d826901` and the earlier uncommitted role-dashboard work, whose full
+baseline patch SHA-256 is `5f2dc6650389dee2bb641e3cbcd1e59b5a127ffddeefac447078ef022f201c9c`.
+The original report artifacts and all newer native-printer changes are preserved. No Git
+delivery, deployment, live payment or physical-printer action is part of this feature.
+
+The buyer request page now uses the shared header and a four-step model/options/delivery/review
+flow, with a persistent model preview, per-file preview choice, catalogue-backed radio options,
+copy validation, a live specification and a final editable summary. Dimensions remain in mm;
+the preview tint uses the existing illustrative colour utility. Only final review submits the
+existing private-upload pipeline. Success focuses its heading and links to the saved request.
+Upload errors do not falsely claim that a timed-out server request never succeeded.
+
+Quotations have actionable/accepted/closed views and a review/address/accept step leading to the
+existing payment controls. Orders have reference search, state filters, progress and server-state
+next actions, with no fabricated times. The owner has workflow/setup navigation, loaded-request
+triage/search, expandable model/analysis/pricing decisions and unfinished-production filters.
+Completed jobs are accessed through order history: the production endpoint excludes them.
+The opaque FIFO sort key is not displayed as a queue position. Every physical-readiness,
+confirmation, handoff, recent-MFA and verified-payment requirement remains unchanged.
+
+Fresh verification uses API `127.0.0.1:8031` and web `localhost:3111`, with a disposable SQLite
+database, real local private-file storage and normal cookie/CSRF/password/MFA authentication.
+The rate limiter and payment provider are fictional; profiles/rates/analysis for the ready-to-quote
+fixture are explicitly LAB ONLY. The uploaded 20 mm cube is a separate genuine private upload:
+its stored request is `analyzing`, quantity 2, White, shipping, and its 1131-byte source is
+quarantined. No worker sliced that model, and no real slicing or printer acceptance is claimed.
+
+The owner refreshed an intentionally expired fixture estimate and issued a shipping quotation.
+The buyer reviewed its price, entered a fictional address, accepted and reached payment. A
+test-only driver used the existing authenticated checkout API with an in-process provider; the
+browser's status check confirmed that fictional capture, then the existing worker enqueue
+service created exactly one job. The owner recorded preparation, simulated readiness/manual
+start, completion, QA, shipment and receipt. The downloaded artifact's SHA-256 matched and its
+contents were comments only, with no motion or heater commands. The final order, job and
+fulfilment are completed. This is UI/API/database verification, not a physical print or gateway test.
+
+Evidence is ignored under `.local/evidence/workflow-polish/`: real before/after screenshots,
+private-upload and checkout/queue logs, test-first missing-module/resolver failures, and passing **59 web
+tests**, lint (the existing sign-out warning only), TypeScript and optimized ordinary-web build.
+Backend/tool diffs match the prior baseline, so the previous 261 Python passes are not claimed
+as a fresh rerun. No API parser/payload, payment adapter, dependency, homepage, model-preview
+implementation or station code changed in this polish. The account component's outage/retry
+branch and a pure frontend dashboard-access resolver are included in the role-routing amendment.
+
+The user's final correction supersedes the earlier manual wrong-role links below. The genuine
+before screenshot is `before/signup-buyer-wrong-shell.jpg`: a newly registered buyer opening
+`/operations` saw the owner heading without records. The corrected panel renders only a neutral
+account check until the verified role matches. Buyer-on-owner routes to `/orders`, owner-on-buyer
+routes to `/operations`, and anonymous dashboard visits route to `/sign-in`, using replacement
+navigation. Owner visits to the buyer request form also redirect to `/operations`. The API remains
+the authorization boundary; this frontend guard does not grant permissions or replace it.
+
+On the final optimized build, normal public registration delivered verification mail to the
+existing dedicated loopback Mailpit sink (not an external address). The real fragment-token
+verification endpoint activated a fresh buyer, and password sign-in opened that buyer's empty
+dashboard. A pre-verification login was rejected in the first lab. There was no role picker,
+verification bypass, production identity or capture-sender code change. Tokens stayed private
+and screenshots were taken only after fragment removal. Owner password/MFA and both automatic
+role redirects were exercised. API request logs and `neutral-html.log` supplement the browser
+captures: initial HTML has no role heading or workspace navigation. A MutationObserver was not
+injected because browser inspection supports read-only evaluation; no transient observer proof
+is claimed.
+
+The lab API was genuinely stopped to verify retry-only outage states on `/orders`, `/account`
+and `/get-a-quote`, with no sign-in redirect. Restart created a fresh disposable fixture and
+invalidated old lab cookies, so retry correctly recovered to sign-in; normal sign-in then worked.
+The earlier completed-order lab/database remains preserved, not misrepresented as the restarted
+fixture. New captures are `after/*redirect*.jpg`, `after/*outage.jpg`, `after/signup-verified.jpg`
+and `after/configurator-optimized.jpg`. Old denial-screen captures are baseline evidence only.
+
+Final review caught a frontend order-selection race: accepting a quotation opened its new
+order inside the refresh callback, after which the refresh could restore a previously selected
+order. Opening the accepted order now runs after that refresh finishes. The optimized replay
+opened existing order `PF-DF8EE566247A44B0` first, then accepted a different quotation and ended
+with `PF-2B55B991F5694787` selected and its ₹168 test-payment step visible; the old row was
+unselected. `order-selection-replay.json` records actual DOM results, and
+`after/order-{A-before-accepting-B,B-after-acceptance}.jpg` shows the sequence. This changes no
+payment payload, authorization or backend transition. Copy spacing/singular forms were also
+corrected, and the same 59 tests, lint, TypeScript and optimized build passed again.
+
+Station-mode build was not run: `.next-print-station` serves the existing station on 3102 and
+`.next-lan` is the LAN launcher's retained prebuilt artifact. Neither was written. The optimized
+ordinary-web build uses the isolated `.next-verification` directory. The station flag changes
+only the dist directory and printer rewrite in unchanged `next.config.ts`; no app source reads it.
+
+Header proof stores actual before/after markup, lengths and hashes. Raw strings differ only in
+the compiler's development versus production CSS class-name prefix; the explicit normalization
+and comparison are recorded, not presented as raw equality. Navigation/link/ARIA markup is
+otherwise identical on `/` and `/print`. The former 780–1080 px account-navigation gap and narrow
+CTA wrapping are corrected in shared CSS without changing the header's DOM or destinations.
+
+## Role dashboards on current GitHub main — October 21, 2026
+
+The owner explicitly required the newest GitHub main. Local main was safely fast-forwarded
+from `49d1b17` to `d8269010530dc32fa5bb35d1642dc5ea46c79a98`, preserving all newer storefront,
+printer, profile, rate and dispatch changes and the original untracked academic artifacts.
+The dashboard work remains a separate uncommitted diff on that baseline. Initial work and
+its 183 Python / 44 web test results on the older revision are superseded, not new-main
+acceptance; recoverable patch copies are in ignored `.local/opus/role-dashboards/`.
+
+Buyers land at `/orders`; the primary owner lands at `/operations`, including after MFA.
+The default overview uses complete role-scoped database counts, with links to the existing
+quotation, order, production, payment, pricing and fulfilment tools. Both reuse current main's
+shared logo/header and appearance variables. Buyer recent requests remain read-only here.
+Online-payment configuration/Test Mode and missing owner MFA are explicit; no revenue, stock
+or printer connection is invented. The quotation rate card is distinct from approved local
+station rates. `/print`, physical dispatch, slot mapping and commissioning are unchanged.
+
+Public registration still creates buyers only. Provision the owner once with the existing
+interactive `xxx-api provision-owner --email OWNER_EMAIL --display-name OWNER_NAME` under
+the intended service configuration, or `tools/local_service.py owner --email OWNER_EMAIL
+--name OWNER_NAME` for that launcher. Enrol MFA at `/account`; never share password, TOTP or
+recovery material in chat. Dashboard authorization checks the server's current identity rather
+than a public role selector. API summaries contain no PII, record IDs, model paths or money.
+
+Fresh fictional SQLite browser labs run on API `127.0.0.1:8031` and web `http://localhost:3111`,
+separate from every existing service/database. They use normal password/cookie/CSRF/MFA
+authentication. A second verified buyer has no records. The limiter/storage doubles and seeded
+commercial records do not establish real Redis, storage, Razorpay or hardware readiness. Test
+Mode uses an in-process fictional provider, not real Razorpay credentials or a real payment.
+No external email, payment, LAN-printer or physical-print actions are used by this verification.
+
+Current-main evidence lives in ignored `.local/evidence/role-dashboards/main-d826901/`.
+The homepage and `/print` headers were captured at 1440 and 390 px before/after integration;
+`header-comparison.json` records identical default header DOM in both cases. The dashboard
+captures cover owner password/MFA routing, buyer data, second-buyer empty state, both wrong-role
+URLs, anonymous denial, mobile menus with correct dashboard entries, keyboard focus and light/
+dark appearances. Mobile content width equals viewport width (375 CSS px after the scrollbar).
+The shared skip link reaches `#main-content` and focuses the main region after a fresh load.
+The original role-dashboard feature retained a shared-header account-navigation gap between
+780 and 1080 px. The subsequent guided-workflow polish above corrects it in shared CSS.
+
+The original frontend mismatch was genuinely reproduced on `49d1b17`: the owner on `/orders`
+received the buyer UI with global records, and a buyer on `/operations` was told to sign in.
+Those old-baseline pictures remain under `role-dashboards/before/`. Current-main `after/`
+pictures show the corrected role-home link without records. API resource ownership was already
+enforced; these are frontend corrections plus new summary endpoints, not a backend access
+control repair. The test-first summary checks initially failed on missing endpoints.
+
+Current-main API/worker verification passed **261 tests, 2 skipped** (opt-in real-Orca cases);
+the web suite passed **49 tests**. Ruff, mypy (74 source files), TypeScript and ESLint pass,
+with the pre-existing account sign-out navigation warning retained. Raw logs, optimized-build
+results and exact-diff review evidence are in the same ignored evidence directory. HTTP checks
+cover wrong roles, anonymous access, cross-buyer lists/detail, counts beyond 100 rows, revoked
+sessions, quotation expiry, no-store/read-only endpoints and explicit Test Mode.
+The optimized verification build also passed. Normal owner and buyer sign-in on that build
+landed on the correct dashboards; `after/owner-optimized.jpg`, `after/owner-refresh.jpg` and
+`after/buyer-optimized.jpg` record the actual rendered result, with no console errors/warnings.
+
+Two import-order lint errors came with remote `d826901` in `test_prepare_print_preset.py` and
+`test_print_station.py`. Only their import blocks were corrected mechanically, with no changed
+names or assertions. `ruff-before.log` records the failures and `ruff.log` the passing replay.
+The focused replay passed 94 tests with 2 opt-in skips; the full replay retained 261 passed / 2
+skipped, confirming unchanged test behaviour. No printer runtime code changed in this correction.
+
+## Historical commerce workflow and earlier verification
+
 The project has private intake, configured analysis, immutable quotations/orders, disabled-by-default Razorpay Checkout/webhook/reconciliation code, transactional status email, manual Windows handoff, QA and fulfilment tracking. These are locally tested capabilities, not a completed production product or launch approval. Business rates/policies, real gateway credentials and hardware access remain unavailable.
 
 ## Real-component local workflow — 19 October 2026

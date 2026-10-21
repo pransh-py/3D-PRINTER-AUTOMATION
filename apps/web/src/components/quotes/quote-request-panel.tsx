@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import {
   type ChangeEvent,
   type FormEvent,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -23,7 +25,6 @@ import {
   type ModelFileRejection,
   type QuoteRequest,
   type QuoteRequestList,
-  type QuoteRequestStatus,
   QuoteApiError,
   SUPPORTED_MODEL_EXTENSIONS,
   completeModelUpload,
@@ -39,6 +40,21 @@ import {
 import styles from "./quote-request.module.css";
 import { listPrintPresets, type PrintPreset } from "@/lib/print-specification";
 import { PrintSpecificationSummary } from "./print-specification-summary";
+import { StatusBadge } from "@/components/status-badge";
+import { UiIcon } from "@/components/ui-icon";
+import {
+  firstInvalidStep,
+  validateQuoteStep,
+  type QuoteDraft,
+} from "@/lib/order-journey";
+import { swatchColour, type ModelStats } from "@/lib/model-options";
+
+const STEPS = ["Model", "Print options", "Delivery", "Review"] as const;
+const DELIVERY = {
+  pickup: "Pickup",
+  local_delivery: "Local delivery",
+  shipping: "Pan-India shipping",
+} as const;
 
 type FileProgressStatus =
   | "pending"
@@ -118,37 +134,14 @@ function progressLabel(status: FileProgressStatus): string {
   }
 }
 
-function quoteStatusLabel(status: QuoteRequestStatus): string {
-  switch (status) {
-    case "draft":
-      return "Draft";
-    case "analyzing":
-      return "Checking printability";
-    case "analysis_failed":
-      return "Analysis failed";
-    case "analysis_ready":
-      return "Model analysis ready";
-    case "estimate_ready":
-      return "Estimate ready for owner review";
-    case "owner_review":
-      return "Awaiting owner review";
-    case "quoted":
-      return "Quoted";
-    case "rejected":
-      return "Rejected";
-    default:
-      return status;
-  }
-}
-
 function analysisStatusSummary(status: AnalysisRun["status"]): string {
   switch (status) {
     case "queued":
-      return "Validation queued";
+      return "Queued for checks";
     case "running":
-      return "Validating models";
+      return "Checking your models";
     case "awaiting_profile":
-      return "Models passed source validation. An approved AD5X slicer profile is still required before slicing or estimating.";
+      return "Your models passed our checks. Pricing continues once the print profile is ready.";
     case "succeeded":
       return "Model analysis complete";
     case "failed":
@@ -197,6 +190,17 @@ function analysisAssetSummary(asset: AnalysisAssetResult): string {
 }
 
 export function QuoteRequestPanel() {
+  const router = useRouter();
+  const [accountAttempt, setAccountAttempt] = useState(0);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
+  const [step, setStep] = useState(0);
+  const [stepError, setStepError] = useState<string | null>(null);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const [modelStats, setModelStats] = useState<ModelStats | null>(null);
+  const stepHeading = useRef<HTMLHeadingElement>(null);
+  const successHeading = useRef<HTMLHeadingElement>(null);
+  const movedStep = useRef(false);
+  const focusedHash = useRef("");
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   const [userError, setUserError] = useState<string | null>(null);
@@ -251,6 +255,53 @@ export function QuoteRequestPanel() {
   const [recentLoading, setRecentLoading] = useState(false);
   const [recentError, setRecentError] = useState<string | null>(null);
 
+  const draft: QuoteDraft = {
+    fileCount: selectedFiles.length,
+    selectionErrors,
+    preset: selectedPreset,
+    colour,
+    quantity,
+    fulfillmentMode,
+    notes: buyerNotes,
+  };
+  function moveStep(target: number) {
+    if (submitting) return;
+    if (target > step) {
+      for (let current = 0; current < target; current++) {
+        const error = validateQuoteStep(current, draft);
+        if (error) {
+          setStepError(error);
+          setStep(current);
+          movedStep.current = true;
+          return;
+        }
+      }
+    }
+    setStepError(null);
+    movedStep.current = true;
+    setStep(target);
+  }
+  useEffect(() => {
+    if (movedStep.current) stepHeading.current?.focus();
+  }, [step]);
+  useEffect(() => {
+    if (completedQuote) successHeading.current?.focus();
+  }, [completedQuote]);
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (
+      hash === focusedHash.current ||
+      !recent?.items.some((item) => hash === `request-${item.id}`)
+    )
+      return;
+    const row = document.getElementById(hash);
+    if (row) {
+      focusedHash.current = hash;
+      row.focus();
+      row.scrollIntoView({ block: "start" });
+    }
+  }, [recent]);
+
   useEffect(() => {
     let active = true;
     void getCurrentUserWithRefresh(document.cookie)
@@ -258,14 +309,18 @@ export function QuoteRequestPanel() {
         if (active) {
           setUser(currentUser);
           setUserError(null);
+          if (currentUser.role === "owner") router.replace("/operations");
         }
       })
       .catch((caught: unknown) => {
         if (active) {
+          const signedOut =
+            caught instanceof AuthApiError && caught.status === 401;
+          setNeedsSignIn(signedOut);
           setUserError(
-            caught instanceof AuthApiError
-              ? caught.message
-              : "Your account could not be loaded.",
+            signedOut
+              ? "Please sign in to request a quote."
+              : "We couldn’t confirm your account right now. You have not been signed out.",
           );
         }
       })
@@ -277,7 +332,7 @@ export function QuoteRequestPanel() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [accountAttempt, router]);
 
   const refreshRecent = useCallback(async () => {
     setRecentLoading(true);
@@ -338,15 +393,19 @@ export function QuoteRequestPanel() {
   }, [analysisInProgress, user?.role]);
 
   function handleFilesSelected(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (files.length) selectFiles(files);
+  }
+
+  function selectFiles(files: readonly File[]) {
     setCompletedQuote(null);
     setSubmitError(null);
     setProgress([]);
-    const fileList = event.target.files;
-    const files = fileList === null ? [] : Array.from(fileList);
-    event.target.value = "";
-    if (files.length === 0) {
-      return;
-    }
+    setStepError(null);
+    setStep(0);
+    setPreviewIndex(0);
+    setModelStats(null);
 
     const validation = validateModelSelection(files);
     const errors: string[] = [];
@@ -374,6 +433,11 @@ export function QuoteRequestPanel() {
       current.filter((_, position) => position !== index),
     );
     setSelectionErrors([]);
+    setPreviewIndex(0);
+    setModelStats(null);
+    setProgress([]);
+    setSubmitError(null);
+    setStep(0);
   }
 
   function updateProgress(index: number, status: FileProgressStatus) {
@@ -386,6 +450,16 @@ export function QuoteRequestPanel() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (step !== 3) {
+      moveStep(step + 1);
+      return;
+    }
+    const invalidStep = firstInvalidStep(draft);
+    if (invalidStep !== null) {
+      setStepError(validateQuoteStep(invalidStep, draft));
+      setStep(invalidStep);
+      return;
+    }
     if (
       user === null ||
       user.role !== "buyer" ||
@@ -478,9 +552,17 @@ export function QuoteRequestPanel() {
         <p className={styles.error} role="alert">
           {userError ?? "Please sign in as a buyer to request a quote."}
         </p>
-        <Link className={styles.submitLink} href="/sign-in">
-          Go to sign in
-        </Link>
+        {needsSignIn ? (
+          <>
+            <Link className={styles.submitLink} href="/sign-in">Go to sign in</Link>
+            <Link href="/sign-up">New here? Create a buyer account</Link>
+          </>
+        ) : (
+          <button type="button" onClick={() => {
+            setLoadingUser(true);
+            setAccountAttempt((value) => value + 1);
+          }}>Try again</button>
+        )}
       </div>
     );
   }
@@ -488,249 +570,593 @@ export function QuoteRequestPanel() {
   if (user.role === "owner") {
     return (
       <p className={styles.status}>
-        Owner accounts do not submit buyer quote requests. Sign in with a buyer
-        account to upload models.
+        Opening your dashboard…
       </p>
     );
   }
 
   return (
     <div className={styles.panel}>
-      <form className={styles.form} onSubmit={handleSubmit}>
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor="model-files">
-            Model files
-          </label>
-          <input
-            className={styles.fileInput}
-            id="model-files"
-            type="file"
-            multiple
-            accept={ACCEPT_ATTRIBUTE}
-            onChange={handleFilesSelected}
-            disabled={submitting}
-          />
-          <p className={styles.help}>
-            STL, 3MF, OBJ, STEP or STP. Up to {MAX_MODEL_FILES_PER_QUOTE} files,{" "}
-            {MAX_FILE_MIB} MiB each. All files use the print settings selected
-            below.
+      {completedQuote ? (
+        <section className={styles.successPanel} aria-label="Request submitted">
+          <UiIcon name="check" />
+          <h2 ref={successHeading} tabIndex={-1}>
+            Your models are in for review.
+          </h2>
+          <p>
+            No payment has been taken. Your quotation will appear in your dashboard.
           </p>
-        </div>
-        {selectedFiles[0] ? (
-          <ModelPreview
-            key={`${selectedFiles[0].name}-${selectedFiles[0].lastModified}`}
-            file={selectedFiles[0]}
-          />
-        ) : null}
-        <fieldset
-          className={styles.printOptions}
-          disabled={submitting || catalogueLoading}
-        >
-          <legend>Choose your print</legend>
-          {catalogueLoading ? (
-            <p role="status">Loading available materials and print settings…</p>
-          ) : null}
-          {catalogueError ? (
-            <p role="alert">
-              {catalogueError}{" "}
-              <button type="button" onClick={() => window.location.reload()}>
-                Try again
-              </button>
-            </p>
-          ) : null}
-          {!catalogueLoading && !catalogueError && presets.length === 0 ? (
-            <p role="status">
-              The owner is configuring print options and prices. Ordering opens
-              when those are ready.
-            </p>
-          ) : null}
-          {selectedPreset ? (
-            <>
-              <label htmlFor="print-material">Material</label>
-              <select
-                id="print-material"
-                value={selectedPreset.materialCode}
-                onChange={(event) => {
-                  const next = presets.find(
-                    (preset) => preset.materialCode === event.target.value,
-                  );
-                  setPresetCode(next?.code ?? "");
-                  setColour(next?.colours[0] ?? "");
+          <ol>
+            <li>We check and slice your models.</li>
+            <li>
+              The owner reviews the estimate and issues a final quotation.
+            </li>
+            <li>You review the final price, accept and continue to payment.</li>
+          </ol>
+          <div className={styles.wizardActions}>
+            <a
+              className={styles.submitLink}
+              href={`#request-${completedQuote.id}`}
+            >
+              View status
+            </a>
+            <Link href="/orders">Go to your dashboard</Link>
+            <button
+              type="button"
+              onClick={() => {
+                setCompletedQuote(null);
+                setStep(0);
+                setProgress([]);
+                setQuantity("1");
+                setBuyerNotes("");
+                setFulfillmentMode("pickup");
+                setPreviewIndex(0);
+                setModelStats(null);
+                movedStep.current = true;
+              }}
+            >
+              Start another request
+            </button>
+          </div>
+        </section>
+      ) : (
+        <form className={styles.builder} onSubmit={handleSubmit} noValidate>
+          <aside
+            className={styles.previewColumn}
+            aria-label="Your models and specification"
+          >
+            <div className={styles.field}>
+              <label className={styles.label} htmlFor="model-files">
+                Model files
+              </label>
+              <div
+                className={styles.dropzone}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (!submitting && event.dataTransfer.files.length)
+                    selectFiles(Array.from(event.dataTransfer.files));
                 }}
               >
-                {Array.from(
-                  new Set(presets.map((preset) => preset.materialCode)),
-                ).map((code) => (
-                  <option value={code} key={code}>
-                    {
-                      presets.find((preset) => preset.materialCode === code)
-                        ?.settings.filamentType
-                    }
-                  </option>
+                <UiIcon name="upload" />
+                <strong>Choose model files</strong>
+                <span>or drop them here</span>
+                <input
+                  className={styles.fileInput}
+                  id="model-files"
+                  type="file"
+                  multiple
+                  accept={ACCEPT_ATTRIBUTE}
+                  onChange={handleFilesSelected}
+                  disabled={submitting}
+                />
+              </div>
+              <p className={styles.help}>
+                STL, 3MF, OBJ, STEP or STP. Up to {MAX_MODEL_FILES_PER_QUOTE}{" "}
+                files, {MAX_FILE_MIB} MiB each. All files use the print settings
+                selected below.
+              </p>
+            </div>
+            {selectedFiles[previewIndex] ? (
+              <ModelPreview
+                key={`${selectedFiles[previewIndex].name}-${selectedFiles[previewIndex].lastModified}`}
+                file={selectedFiles[previewIndex]}
+                onStats={setModelStats}
+                colour={swatchColour(colour)}
+              />
+            ) : (
+              <div className={styles.previewEmpty}>
+                <UiIcon name="cube" />
+                <p>Your model preview appears here.</p>
+                <small>
+                  Preview available for STL and OBJ files.
+                </small>
+              </div>
+            )}
+            {modelStats ? (
+              <p className={styles.help}>
+                {modelStats.dimensionsMm
+                  .map((value) => value.toFixed(1))
+                  .join(" × ")}{" "}
+                mm · approximate; fit is confirmed during review.
+              </p>
+            ) : null}
+            {selectedFiles.length > 0 ? (
+              <ul className={styles.fileList} aria-live="polite">
+                {selectedFiles.map((file, index) => (
+                  <li className={styles.fileRow} key={`${file.name}-${index}`}>
+                    <span className={styles.fileName}>
+                      {file.name}
+                      <small>{formatBytes(file.size)}</small>
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Preview ${file.name}`}
+                      aria-pressed={previewIndex === index}
+                      disabled={submitting}
+                      onClick={() => {
+                        setPreviewIndex(index);
+                        setModelStats(null);
+                      }}
+                    >
+                      Preview
+                    </button>
+                    {progress[index] ? (
+                      <span className={styles.fileStatus}>
+                        {progressLabel(progress[index].status)}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={submitting}
+                        aria-label={`Remove ${file.name}`}
+                        onClick={() => handleRemoveFile(index)}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </li>
                 ))}
-              </select>
-              <label htmlFor="print-preset">Quality and infill</label>
-              <select
-                id="print-preset"
-                value={presetCode}
-                onChange={(event) => {
-                  const next = presets.find(
-                    (preset) => preset.code === event.target.value,
-                  );
-                  setPresetCode(event.target.value);
-                  setColour(next?.colours[0] ?? "");
-                }}
-              >
-                {presets
-                  .filter(
-                    (preset) =>
-                      preset.materialCode === selectedPreset.materialCode,
-                  )
-                  .map((preset) => (
-                    <option value={preset.code} key={preset.code}>
-                      {preset.label}: {preset.settings.layerHeightMm} mm,{" "}
-                      {preset.settings.infillPercent}% infill
-                    </option>
-                  ))}
-              </select>
-              {selectedPreset.colours.length ? (
-                <>
-                  <label htmlFor="print-colour">Filament colour</label>
-                  <select
-                    id="print-colour"
-                    value={colour}
-                    onChange={(event) => setColour(event.target.value)}
-                  >
-                    {selectedPreset.colours.map((option) => (
-                      <option key={option}>{option}</option>
-                    ))}
-                  </select>
-                </>
+              </ul>
+            ) : null}
+            <div className={styles.liveSummary}>
+              <p className={styles.label}>Your print specification</p>
+              {selectedPreset ? (
+                <PrintSpecificationSummary
+                  value={{
+                    presetCode: selectedPreset.code,
+                    presetLabel: selectedPreset.label,
+                    materialCode: selectedPreset.materialCode,
+                    profileSha256: selectedPreset.profileSha256,
+                    colour: colour || null,
+                    settings: selectedPreset.settings,
+                  }}
+                />
               ) : (
                 <p className={styles.help}>
-                  The owner will confirm the loaded filament colour before
-                  printing.
+                  Only configured, priced print profiles can be ordered.
                 </p>
               )}
-              <PrintSpecificationSummary
-                value={{
-                  presetCode: selectedPreset.code,
-                  presetLabel: selectedPreset.label,
-                  materialCode: selectedPreset.materialCode,
-                  profileSha256: selectedPreset.profileSha256,
-                  colour: colour || null,
-                  settings: selectedPreset.settings,
-                }}
-              />
               <p className={styles.help}>
-                These settings are used together for slicing. Model dimensions
-                are preserved; use millimetres for STL and OBJ. Colour is loaded
-                and checked by the owner.
+                {selectedFiles.length}{" "}
+                {selectedFiles.length === 1 ? "model file" : "model files"} ·{" "}
+                {quantity || "—"} {quantity === "1" ? "copy" : "copies"}{" "}
+                each · {DELIVERY[fulfillmentMode]}
               </p>
-            </>
-          ) : null}
-        </fieldset>
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor="model-quantity">
-            Copies of each model
-          </label>
-          <input
-            id="model-quantity"
-            type="number"
-            value={quantity}
-            min={1}
-            max={100}
-            required
-            disabled={submitting}
-            onChange={(event) => setQuantity(event.target.value)}
-          />
-          <label className={styles.label} htmlFor="fulfillment-mode">
-            Fulfilment
-          </label>
-          <select
-            id="fulfillment-mode"
-            value={fulfillmentMode}
-            disabled={submitting}
-            onChange={(event) =>
-              setFulfillmentMode(event.target.value as typeof fulfillmentMode)
-            }
-          >
-            <option value="pickup">Pickup</option>
-            <option value="local_delivery">Local delivery</option>
-            <option value="shipping">Pan-India shipping</option>
-          </select>
-          <label className={styles.label} htmlFor="buyer-notes">
-            Requirements (optional)
-          </label>
-          <textarea
-            id="buyer-notes"
-            value={buyerNotes}
-            maxLength={1000}
-            disabled={submitting}
-            onChange={(event) => setBuyerNotes(event.target.value)}
-          />
-          <p className={styles.help}>
-            Notes do not change the selected print settings. The owner must
-            confirm any special requirement in the quotation.
-          </p>
-        </div>
-        {selectionErrors.length > 0 && (
-          <ul className={styles.errorList} role="alert">
-            {selectionErrors.map((message) => (
-              <li key={message}>{message}</li>
-            ))}
-          </ul>
-        )}
-
-        {selectedFiles.length > 0 && (
-          <ul className={styles.fileList} aria-live="polite">
-            {selectedFiles.map((file, index) => (
-              <li key={`${file.name}-${index}`} className={styles.fileRow}>
-                <span className={styles.fileName}>{file.name}</span>
-                <span className={styles.fileSize}>
-                  {formatBytes(file.size)}
-                </span>
-                {progress[index] ? (
-                  <span className={styles.fileStatus}>
-                    {progressLabel(progress[index].status)}
-                  </span>
-                ) : (
-                  !submitting && (
+            </div>
+          </aside>
+          <div className={styles.controls}>
+            <ol className={styles.stepper} aria-label="Request steps">
+              {STEPS.map((label, index) => (
+                <li key={label}>
+                  <button
+                    type="button"
+                    aria-current={step === index ? "step" : undefined}
+                    disabled={submitting}
+                    onClick={() => moveStep(index)}
+                  >
+                    <span>
+                      {index < step ? <UiIcon name="check" /> : index + 1}
+                    </span>
+                    {label}
+                  </button>
+                </li>
+              ))}
+            </ol>
+            <div className={styles.stepHeading}>
+              <p className={styles.label}>
+                Step {step + 1} of {STEPS.length}
+              </p>
+              <h2 ref={stepHeading} tabIndex={-1}>
+                {
+                  [
+                    "Start with your model.",
+                    "Make it your print.",
+                    "How will you receive it?",
+                    "Check everything before sending.",
+                  ][step]
+                }
+              </h2>
+            </div>
+            {step === 0 ? (
+              <div className={styles.modelGuide}>
+                <p>
+                  Add your files, then choose one print setting for all models in this request.
+                </p>
+                <ul>
+                  <li>
+                    Use millimetres for STL and OBJ. Dimensions are preserved.
+                  </li>
+                  <li>
+                    Preview orbit changes only your view, not the printed
+                    orientation.
+                  </li>
+                  <li>
+                    We check printability and fit before issuing a final price.
+                  </li>
+                </ul>
+              </div>
+            ) : null}
+            {step === 1 ? (
+              <>
+                <fieldset
+                  className={styles.printOptions}
+                  disabled={submitting || catalogueLoading}
+                >
+                  <legend>Choose your print</legend>
+                  {catalogueLoading ? (
+                    <p role="status">
+                      Loading available materials and print settings…
+                    </p>
+                  ) : null}
+                  {catalogueError ? (
+                    <p role="alert">
+                      {catalogueError}{" "}
+                      <button
+                        type="button"
+                        onClick={() => window.location.reload()}
+                      >
+                        Try again
+                      </button>
+                    </p>
+                  ) : null}
+                  {!catalogueLoading &&
+                  !catalogueError &&
+                  presets.length === 0 ? (
+                    <p role="status">
+                      The owner is configuring print options and prices.
+                      Ordering opens when those are ready.
+                    </p>
+                  ) : null}
+                  {selectedPreset ? (
+                    <>
+                      <fieldset className={styles.choices}>
+                        <legend>Material</legend>
+                        {Array.from(
+                          new Set(presets.map((preset) => preset.materialCode)),
+                        ).map((code) => (
+                          <label key={code} className={styles.choice}>
+                            <input
+                              type="radio"
+                              name="material"
+                              checked={selectedPreset.materialCode === code}
+                              onChange={() => {
+                                const next = presets.find(
+                                  (preset) => preset.materialCode === code,
+                                );
+                                setPresetCode(next?.code ?? "");
+                                setColour(next?.colours[0] ?? "");
+                              }}
+                            />
+                            {
+                              presets.find(
+                                (preset) => preset.materialCode === code,
+                              )?.settings.filamentType
+                            }
+                          </label>
+                        ))}
+                      </fieldset>
+                      <fieldset className={styles.choices}>
+                        <legend>Quality & infill</legend>
+                        {presets
+                          .filter(
+                            (preset) =>
+                              preset.materialCode ===
+                              selectedPreset.materialCode,
+                          )
+                          .map((preset) => (
+                            <label
+                              className={styles.presetChoice}
+                              key={preset.code}
+                            >
+                              <input
+                                type="radio"
+                                name="profile"
+                                checked={presetCode === preset.code}
+                                onChange={() => {
+                                  setPresetCode(preset.code);
+                                  setColour(preset.colours[0] ?? "");
+                                }}
+                              />
+                              <span>
+                                <strong>{preset.label}</strong>
+                                <small>
+                                  {preset.settings.layerHeightMm} mm layers ·{" "}
+                                  {preset.settings.infillPercent}% infill ·{" "}
+                                  {preset.settings.wallLoops} walls
+                                  <br />
+                                  {preset.settings.nozzleDiameterMm} mm nozzle ·
+                                  supports{" "}
+                                  {preset.settings.supports ? "on" : "off"}
+                                </small>
+                              </span>
+                            </label>
+                          ))}
+                      </fieldset>
+                      <p className={styles.help}>
+                        Each profile sets quality, infill, walls and supports together.
+                      </p>
+                      {selectedPreset.colours.length ? (
+                        <>
+                          <fieldset className={styles.choices}>
+                            <legend>Filament colour</legend>
+                            {selectedPreset.colours.map((option) => (
+                              <label key={option} className={styles.choice}>
+                                <input
+                                  type="radio"
+                                  name="colour"
+                                  value={option}
+                                  checked={colour === option}
+                                  onChange={() => setColour(option)}
+                                />
+                                {option}
+                              </label>
+                            ))}
+                          </fieldset>
+                        </>
+                      ) : (
+                        <p className={styles.help}>
+                          The owner will confirm the loaded filament colour
+                          before printing.
+                        </p>
+                      )}
+                      <PrintSpecificationSummary
+                        value={{
+                          presetCode: selectedPreset.code,
+                          presetLabel: selectedPreset.label,
+                          materialCode: selectedPreset.materialCode,
+                          profileSha256: selectedPreset.profileSha256,
+                          colour: colour || null,
+                          settings: selectedPreset.settings,
+                        }}
+                      />
+                      <p className={styles.help}>
+                        These settings are used together for slicing. Model
+                        dimensions are preserved; use millimetres for STL and
+                        OBJ. Colour is loaded and checked by the owner.
+                      </p>
+                    </>
+                  ) : null}
+                </fieldset>
+                <div className={styles.field}>
+                  <label className={styles.label} htmlFor="model-quantity">
+                    Copies of each model
+                  </label>
+                  <div className={styles.quantity}>
                     <button
-                      className={styles.removeButton}
                       type="button"
-                      onClick={() => handleRemoveFile(index)}
+                      aria-label="One fewer copy"
+                      disabled={submitting || Number(quantity) <= 1}
+                      onClick={() =>
+                        setQuantity(
+                          String(Math.max(1, (Number(quantity) || 1) - 1)),
+                        )
+                      }
                     >
-                      Remove
+                      −
                     </button>
-                  )
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+                    <input
+                      id="model-quantity"
+                      type="number"
+                      value={quantity}
+                      min={1}
+                      max={100}
+                      required
+                      disabled={submitting}
+                      onChange={(event) => setQuantity(event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      aria-label="One more copy"
+                      disabled={submitting || Number(quantity) >= 100}
+                      onClick={() =>
+                        setQuantity(
+                          String(Math.min(100, (Number(quantity) || 1) + 1)),
+                        )
+                      }
+                    >
+                      +
+                    </button>
+                  </div>
+                  <p className={styles.help}>
+                    1–100 copies of every model in this request.
+                  </p>
+                </div>
+              </>
+            ) : null}
+            {step === 2 ? (
+              <div className={styles.field}>
+                <label className={styles.label} htmlFor="fulfillment-mode">
+                  Fulfilment
+                </label>
+                <select
+                  id="fulfillment-mode"
+                  value={fulfillmentMode}
+                  disabled={submitting}
+                  onChange={(event) =>
+                    setFulfillmentMode(
+                      event.target.value as typeof fulfillmentMode,
+                    )
+                  }
+                >
+                  <option value="pickup">Pickup</option>
+                  <option value="local_delivery">Local delivery</option>
+                  <option value="shipping">Pan-India shipping</option>
+                </select>
+                <p className={styles.help}>
+                  Any charge appears in your quotation; the address is requested
+                  when you accept.
+                </p>
+                <label className={styles.label} htmlFor="buyer-notes">
+                  Requirements (optional)
+                </label>
+                <textarea
+                  id="buyer-notes"
+                  value={buyerNotes}
+                  maxLength={1000}
+                  disabled={submitting}
+                  onChange={(event) => setBuyerNotes(event.target.value)}
+                />
+                <p className={styles.help}>
+                  {buyerNotes.length}/1000 characters
+                </p>
+                <p className={styles.help}>
+                  Notes do not change the selected print settings. The owner
+                  must confirm any special requirement in the quotation.
+                </p>
+              </div>
+            ) : null}
+            {step === 3 ? (
+              <div className={styles.review}>
+                <section>
+                  <div>
+                    <h3>Models</h3>
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() => moveStep(0)}
+                    >
+                      Edit models
+                    </button>
+                  </div>
+                  <ul>
+                    {selectedFiles.map((file, index) => (
+                      <li key={`${file.name}-${index}`}>
+                        {file.name} · {formatBytes(file.size)}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+                <section>
+                  <div>
+                    <h3>Print options</h3>
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() => moveStep(1)}
+                    >
+                      Edit print options
+                    </button>
+                  </div>
+                  <p>
+                    {selectedPreset?.label} ·{" "}
+                    {colour || "Colour confirmed by owner"} · {quantity}{" "}
+                    {quantity === "1" ? "copy" : "copies"} each
+                  </p>
+                  <p className={styles.help}>
+                    {selectedPreset?.settings.layerHeightMm} mm layers ·{" "}
+                    {selectedPreset?.settings.infillPercent}% infill · supports{" "}
+                    {selectedPreset?.settings.supports ? "on" : "off"}
+                  </p>
+                </section>
+                <section>
+                  <div>
+                    <h3>Delivery & requirements</h3>
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() => moveStep(2)}
+                    >
+                      Edit delivery
+                    </button>
+                  </div>
+                  <p>{DELIVERY[fulfillmentMode]}</p>
+                  <p className={styles.notes}>
+                    {buyerNotes || "No special requirements added."}
+                  </p>
+                </section>
+                <div className={styles.priceExplanation}>
+                  <strong>A reviewed price, before you pay.</strong>
+                  <p>
+                    We check and slice each model, then issue a final quotation with
+                    the print price, any adjustment, delivery charge and tax.
+                  </p>
+                  <p>
+                    Submitting is free. You pay only after accepting the quotation.
+                    Your files stay private.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+            {selectionErrors.length > 0 && (
+              <ul className={styles.errorList} role="alert">
+                {selectionErrors.map((message) => (
+                  <li key={message}>{message}</li>
+                ))}
+              </ul>
+            )}
 
-        {submitError && (
-          <p className={styles.error} role="alert">
-            {submitError}
-          </p>
-        )}
+            {stepError ? (
+              <p role="alert" className={styles.error}>
+                {stepError}
+              </p>
+            ) : null}
+            {submitError && (
+              <p className={styles.error} role="alert">
+                {submitError} We could not confirm submission. Check recent
+                requests before trying again.
+              </p>
+            )}
 
-        <button
-          className={styles.submit}
-          type="submit"
-          disabled={submitting || selectedFiles.length === 0 || !selectedPreset}
-        >
-          {submitting ? "Uploading…" : "Submit for a quote"}
-        </button>
-      </form>
-
-      {completedQuote && (
-        <p className={styles.success} aria-live="polite">
-          Your quote request has been submitted. Every file is quarantined and
-          pending validation — no price is final until our system analysis and
-          owner review are complete.
-        </p>
+            {submitting ? (
+              <p role="status">
+                File{" "}
+                {Math.min(
+                  progress.findIndex(
+                    (entry) => entry.status !== "quarantined",
+                  ) + 1 || selectedFiles.length,
+                  selectedFiles.length,
+                )}{" "}
+                of {selectedFiles.length} · uploading and checking your request…
+              </p>
+            ) : null}
+            <div className={styles.wizardActions}>
+              {step > 0 ? (
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => moveStep(step - 1)}
+                >
+                  Back
+                </button>
+              ) : null}
+              <button
+                className={styles.submit}
+                type="submit"
+                disabled={submitting}
+              >
+                {submitting
+                  ? "Submitting…"
+                  : step === 3
+                    ? "Submit for review"
+                    : "Continue"}
+              </button>
+            </div>
+            <p className={styles.help}>
+              No charge until you accept a final quotation and complete payment.
+            </p>
+          </div>
+        </form>
       )}
 
       <section
@@ -755,17 +1181,32 @@ export function QuoteRequestPanel() {
         {recent && recent.items.length > 0 && (
           <ul className={styles.recentList}>
             {recent.items.map((item) => (
-              <li key={item.id} className={styles.recentRow}>
+              <li
+                key={item.id}
+                id={`request-${item.id}`}
+                tabIndex={-1}
+                className={styles.recentRow}
+              >
                 <div className={styles.recentHeader}>
-                  <span className={styles.recentStatus}>
-                    {quoteStatusLabel(item.status)}
-                  </span>
+                  <StatusBadge kind="request" status={item.status} />
                   <span className={styles.recentMeta}>
                     {item.assets.length} file
                     {item.assets.length === 1 ? "" : "s"} ·{" "}
                     {formatDate(item.createdAt)}
                   </span>
                 </div>
+                <p className={styles.help}>
+                  {item.status === "quoted" ? (
+                    <Link href="/orders#quotations">
+                      Review your final quotation in your dashboard.
+                    </Link>
+                  ) : item.status === "analysis_failed" ||
+                    item.status === "rejected" ? (
+                    "Read the review details below before preparing another request."
+                  ) : (
+                    "The owner will issue a final quotation after model checks and analysis."
+                  )}
+                </p>
                 <PrintSpecificationSummary value={item.printSpecification} />
                 {item.latestAnalysis && (
                   <div className={styles.analysis}>

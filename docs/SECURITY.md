@@ -173,3 +173,85 @@ responses or slicer subprocesses. Automatic stop
 detection requires consistent native and Moonraker idle evidence; missing connections,
 heating, paused/busy states or queued work never count as proof of a stopped attempt.
 The monitor only updates local job status and never issues stop, reset or retry commands.
+
+## Commerce dispatch boundary — October 21, 2026
+
+`printer_dispatch_enabled` defaults to false. Buyer cookies never authorize bridge pairing,
+printer dispatch or production writes. Dispatch writes require the existing primary-owner role,
+recent enrolled MFA, trusted Origin and session CSRF. The server also requires an exact captured
+payment, a reserved ready job, an unchanged approved manifest, one file/copy, a fresh bridge and
+fresh physical readiness. Claiming does not extend the ten-minute readiness deadline: it is
+checked again before acknowledging a send.
+
+Bridge credentials are random, stored hashed by the API, scoped to the paired adapter and
+revocable. The connector's separate local file is mode 0600; pairing input is hidden and no
+credential is printed. Requests allow HTTPS or explicit loopback HTTP and never follow redirects.
+Manual adapters cannot use dispatch routes, and station adapters cannot use manual bridge
+handoff routes. A heartbeat proves connectivity only, not a clear bed or idle printer.
+
+The connector accepts only an explicitly approved commerce profile hash/material with the same
+commissioned plate type. G-code must declare that plate, material and the mapped colour; missing,
+ambiguous or changed metadata refuses the send. There is no relabelling of G-code or rewriting
+of motion/temperature commands. The unchanged single-tool ZMOD preprocessor adds its existing
+metadata/checksum wrapper. Existing driver checks still run immediately before execution.
+
+Authorization, artifact and station-event bindings prevent another bridge, stale/changed files
+or mismatched filenames/hashes from advancing the order. Event IDs replay only identical content.
+Unexpected transitions, completion without a prior send and events after an owner closes the
+attempt are rejected. The local journal persists exact telemetry bodies until acknowledged;
+rejected telemetry is retained for review, never used to retry a physical action.
+
+Cancelling an expired or revoked unclaimed authorization returns the job to preparation and
+requires fresh readiness. This safe reset remains available with dispatch disabled and cannot
+create a new authorization. Its conditional update refuses a grant already claimed/consumed;
+the same lock order and CAS fence ensure a racing claim and reset cannot both succeed.
+Refusal retains the reservation for owner review. An uncertain send requires local inspection;
+recording a failure in the dashboard does not stop a printer. The native station lock and
+one-active-job journal index prevent simultaneous native and commerce physical controllers.
+Physical commissioning of this new adapter remains a separate supervised acceptance step.
+
+## Buyer phone identity through OTPigeon — October 21, 2026
+
+The owner selected WhatsApp OTP (not carrier SMS) for buyer signup and login. A successful
+code proves control of that WhatsApp number, not legal identity. Indian mobile numbers are
+canonicalised to +91 E.164. Phone-only accounts have no fabricated email address or password;
+their unique verified phone identifies the buyer. Existing email accounts remain separate and
+can still sign in with email/password. No automatic account linking or owner phone login exists.
+Owner password/TOTP, verified-payment decisions and physical-printer authorization are unchanged.
+
+PrintFlow owns five-minute, one-use challenges, HMAC code digests, five-guess budgets, bounded
+request/verification rates and a sixty-second resend cooldown. Codes, challenge handles, phone
+numbers and sender credentials must never enter logs or audit details. No account/session is
+created until a delivered challenge is correctly verified. Failed delivery cannot claim success.
+Only the hardened OTPigeon Node delivery path is reused; its unauthenticated POC verification,
+MongoDB and multi-sender/QR HTTP APIs are not exposed. Sender credentials and LocalAuth state
+are private local files, separate from the browser and printer station. QR pairing is performed
+by the owner in their interactive terminal, never captured or posted in chat.
+
+This unofficial WhatsApp Web sender is local-development/demo only; production configuration
+must refuse it. Real delivery remains unverified until the owner pairs a sending account and
+personally requests a code to their own phone. Sender acceptance is not a delivery receipt.
+WhatsApp order notifications are not part of this change: phone-only buyers follow order status
+in their dashboard, and verified-email eligibility remains mandatory for email notifications.
+
+The cookie-isolated phone preview also exposed an existing local-storage validation defect:
+Pydantic returns IPv6 loopback's host as `[::1]`, but the allowlist contained only `::1`.
+`config.py` now accepts that exact bracketed loopback spelling; public hosts and non-loopback
+IPv6 remain rejected. `test_phone_auth.py` covers all three cases. The genuine fresh-process
+Settings probe and before/after pictures are ignored under
+`.local/evidence/otpigeon-identity/{before,after}/ipv6-*`; they exercise configuration validation,
+not a mock result, and contact neither a database nor WhatsApp nor a printer.
+
+Local verification on October 21 recorded 314 passing API/worker tests (two opt-in real-Orca
+checks skipped), 66 passing web tests, four passing sender tests, Python type/lint checks,
+web type checking and an isolated optimized web build. File-backed SQLite exercises concurrent
+issuance, single-use redemption and the five-guess limit; PostgreSQL concurrency and real
+WhatsApp delivery have not been exercised. Browser inspection covers the actual unavailable
+sender response, preserved owner password/TOTP routing and a 375px signup layout with no
+horizontal overflow. The verification sender refuses every send and is not a production fallback.
+Evidence is ignored under `.local/evidence/otpigeon-identity`; sender dependency limitations
+and the owner's private pairing procedure are documented in `services/whatsapp-otp-sender/README.md`.
+The original demo and printer runtime remain untouched. The separate phone preview uses its own
+database, Redis job namespace and IPv6-loopback cookie host; its build/source fingerprint is
+recorded before browser capture. Real delivery requires replacing the verification-only refusing
+transport with the configured adapter, followed by owner-controlled pairing and first-code entry.

@@ -206,9 +206,8 @@ export function OwnerPricingPanel() {
     <section className={styles.result} aria-labelledby="pricing-heading">
       <h2 id="pricing-heading">Owner pricing</h2>
       <p className={styles.help}>
-        Values remain drafts until you activate a version. Rupee amounts are
-        converted to integer paise; contingency and tax use exact percentages.
-        Enter 0 when a component does not apply.
+        Changes stay as a draft until you activate them.
+        Enter 0 for anything that doesn’t apply.
       </p>
       {activePolicy ? (
         <p className={styles.success}>
@@ -354,7 +353,7 @@ export function OwnerPricingPanel() {
             onSubmit={(event) => void estimate(event, quote)}
           >
             <p>
-              Quote {quote.id.slice(0, 8)} · version {quote.version}
+              Request {quote.id.slice(0, 8)}
             </p>
             <select
               className={styles.input}

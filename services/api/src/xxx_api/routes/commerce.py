@@ -27,7 +27,15 @@ from xxx_api.domain.auth import AuditEventType
 from xxx_api.domain.quotes import ModelAssetStatus
 from xxx_api.domain.roles import Role
 from xxx_api.models.analysis import AnalysisAssetResult, AnalysisRun
-from xxx_api.models.commerce import Fulfillment, Order, PrintJob, PrintJobEvent, PrintJobItem, Quote
+from xxx_api.models.commerce import (
+    Fulfillment,
+    Order,
+    PrintAuthorization,
+    PrintJob,
+    PrintJobEvent,
+    PrintJobItem,
+    Quote,
+)
 from xxx_api.models.quotes import ModelAsset, QuoteRequest
 from xxx_api.rate_limit import (
     RateLimiter,
@@ -385,6 +393,16 @@ async def job_action(
     owner: RecentMfaOwnerPrincipal,
     session: DatabaseSession,
 ) -> JobOutput:
+    if payload.action == "manual_started":
+        active = await session.scalar(
+            select(PrintAuthorization.id).where(
+                PrintAuthorization.print_job_id == job_id,
+                PrintAuthorization.revoked_at.is_(None),
+                PrintAuthorization.result_code.in_(["station_authorized", "station_claimed"]),
+            )
+        )
+        if active:
+            raise HTTPException(409, "Resolve the automatic station attempt before a manual start.")
     job = await transition_job(session, owner=owner.user, job_id=job_id, **payload.model_dump())
     return JobOutput.model_validate(job)
 

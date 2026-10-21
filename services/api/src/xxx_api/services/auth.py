@@ -90,7 +90,7 @@ class SessionIssue:
     """Bearer values returned once to the HTTP cookie adapter."""
 
     user_id: UUID
-    email: str
+    email: str | None
     display_name: str
     role: Role
     access_token: str
@@ -98,6 +98,7 @@ class SessionIssue:
     csrf_token: str
     access_expires_at: datetime
     refresh_expires_at: datetime
+    phone_e164: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,6 +321,7 @@ def _build_session_issue(
     return SessionIssue(
         user_id=user.id,
         email=user.email,
+        phone_e164=user.phone_e164,
         display_name=user.display_name,
         role=user.role,
         access_token=issue_access_token(
@@ -414,9 +416,14 @@ async def login(
     )
     password_matches = await _verify_password(
         password,
-        user.password_hash if user is not None else DUMMY_PASSWORD_HASH,
+        user.password_hash if user is not None and user.password_hash else DUMMY_PASSWORD_HASH,
     )
-    if user is None or not password_matches or user.status is UserStatus.DISABLED:
+    if (
+        user is None
+        or not user.password_hash
+        or not password_matches
+        or user.status is UserStatus.DISABLED
+    ):
         await session.rollback()
         raise InvalidCredentialsError
     if user.status is not UserStatus.ACTIVE or user.email_verified_at is None:

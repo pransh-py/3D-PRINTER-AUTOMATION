@@ -1,6 +1,6 @@
 """MFA-protected pairing and credential-scoped outbound artifact handoff."""
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -8,12 +8,14 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
 
+from xxx_api.config import Settings
 from xxx_api.dependencies import (
     DatabaseSession,
     OwnerPrincipal,
     RecentMfaOwnerPrincipal,
     SessionCsrf,
     get_rate_limiter,
+    get_runtime_settings,
 )
 from xxx_api.models.commerce import BridgeInstallation, PrintAuthorization, PrintJobItem
 from xxx_api.rate_limit import (
@@ -23,13 +25,19 @@ from xxx_api.rate_limit import (
     RateLimitUnavailableError,
 )
 from xxx_api.routes.commerce import Storage, TrustedOrigin, artifact_response
-from xxx_api.schemas.commerce import VersionInput
+from xxx_api.schemas.commerce import DispatchEventInput, VersionInput
 from xxx_api.services.bridge import (
+    STATION_ADAPTER,
     authenticate_bridge,
+    authorize_dispatch,
     authorize_handoff,
     begin_pairing,
+    claim_dispatch,
+    dispatch_artifact_access,
+    dispatch_status,
     finish_pairing,
     handoff_access,
+    record_dispatch_event,
     revoke_bridge,
 )
 from xxx_api.services.commerce import WorkflowNotFoundError, manifest, utc
@@ -38,6 +46,7 @@ from xxx_api.services.commerce import WorkflowNotFoundError, manifest, utc
 class PairInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     token: str = Field(min_length=40, max_length=128)
+    adapter: Literal["manual-orca", "station-zmod-v1"] = "manual-orca"
 
 
 class NameInput(BaseModel):
@@ -80,6 +89,7 @@ async def bridge_principal(
 
 
 BridgePrincipal = Annotated[BridgeInstallation, Depends(bridge_principal)]
+RuntimeSettings = Annotated[Settings, Depends(get_runtime_settings)]
 
 
 @router.get("/owner/bridges")
@@ -94,7 +104,7 @@ async def bridges(_owner: OwnerPrincipal, session: DatabaseSession) -> dict[str,
                 "lastHeartbeatAt": utc(row.last_heartbeat_at).isoformat()
                 if row.last_heartbeat_at
                 else None,
-                "adapter": "manual-orca",
+                "adapter": row.adapter_name,
             }
             for row in rows
         ]
@@ -138,26 +148,37 @@ async def authorize(
 
 
 @router.post("/bridge/pair")
-async def pair(payload: PairInput, session: DatabaseSession) -> dict[str, object]:
-    row, credential = await finish_pairing(session, payload.token)
+async def pair(
+    payload: PairInput, session: DatabaseSession, settings: RuntimeSettings
+) -> dict[str, object]:
+    row, credential = await finish_pairing(session, payload.token, adapter=payload.adapter)
     return {
         "id": row.id,
         "credential": credential,
-        "adapter": "manual-orca",
-        "dispatchEnabled": False,
+        "adapter": row.adapter_name,
+        "dispatchEnabled": settings.printer_dispatch_enabled
+        and row.adapter_name == STATION_ADAPTER,
     }
 
 
 @router.post("/bridge/heartbeat")
-async def heartbeat(bridge: BridgePrincipal, session: DatabaseSession) -> dict[str, object]:
+async def heartbeat(
+    bridge: BridgePrincipal, session: DatabaseSession, settings: RuntimeSettings
+) -> dict[str, object]:
     bridge.last_heartbeat_at = utc()
     await session.commit()
     # Connectivity is not proof that a physical printer is idle; no printer state is inferred.
-    return {"adapter": "manual-orca", "dispatchEnabled": False}
+    return {
+        "adapter": bridge.adapter_name,
+        "dispatchEnabled": settings.printer_dispatch_enabled
+        and bridge.adapter_name == STATION_ADAPTER,
+    }
 
 
 @router.get("/bridge/handoffs")
 async def handoffs(bridge: BridgePrincipal, session: DatabaseSession) -> dict[str, object]:
+    if bridge.adapter_name != "manual-orca":
+        raise HTTPException(404, "Manual handoff not available for this adapter")
     rows = await session.scalars(
         select(PrintAuthorization).where(
             PrintAuthorization.bridge_installation_id == bridge.id,
@@ -209,6 +230,111 @@ async def claim(
             for item in items
         ],
     }
+
+
+@router.get("/owner/production/{job_id}/dispatch")
+async def station_status(
+    job_id: UUID, _owner: OwnerPrincipal, session: DatabaseSession, settings: RuntimeSettings
+) -> dict[str, object]:
+    return await dispatch_status(session, job_id, enabled=settings.printer_dispatch_enabled)
+
+
+@router.post("/owner/production/{job_id}/dispatch")
+async def station_authorize(
+    job_id: UUID,
+    payload: VersionInput,
+    _origin: TrustedOrigin,
+    _csrf: SessionCsrf,
+    owner: RecentMfaOwnerPrincipal,
+    session: DatabaseSession,
+    settings: RuntimeSettings,
+) -> dict[str, object]:
+    row = await authorize_dispatch(
+        session,
+        owner.user,
+        job_id,
+        payload.expected_version,
+        enabled=settings.printer_dispatch_enabled,
+    )
+    return {"id": row.id, "expiresAt": row.expires_at, "dispatchEnabled": True}
+
+
+@router.get("/bridge/dispatches")
+async def dispatches(
+    bridge: BridgePrincipal, session: DatabaseSession, settings: RuntimeSettings
+) -> dict[str, object]:
+    if bridge.adapter_name != STATION_ADAPTER or not settings.printer_dispatch_enabled:
+        raise HTTPException(404, "Station dispatch is disabled")
+    rows = await session.scalars(
+        select(PrintAuthorization)
+        .where(
+            PrintAuthorization.bridge_installation_id == bridge.id,
+            PrintAuthorization.revoked_at.is_(None),
+            PrintAuthorization.result_code.in_(["station_authorized", "station_claimed"]),
+        )
+        .order_by(PrintAuthorization.issued_at)
+    )
+    return {
+        "items": [
+            {"id": str(row.id), "jobId": str(row.print_job_id)}
+            for row in rows
+            if row.claimed_at is not None or utc(row.expires_at) > utc()
+        ]
+    }
+
+
+@router.post("/bridge/dispatches/{authorization_id}/claim")
+async def station_claim(
+    authorization_id: UUID,
+    bridge: BridgePrincipal,
+    session: DatabaseSession,
+    settings: RuntimeSettings,
+) -> dict[str, object]:
+    return await claim_dispatch(
+        session, bridge, authorization_id, enabled=settings.printer_dispatch_enabled
+    )
+
+
+@router.get("/bridge/dispatches/{authorization_id}/artifact")
+async def station_artifact(
+    authorization_id: UUID,
+    bridge: BridgePrincipal,
+    session: DatabaseSession,
+    settings: RuntimeSettings,
+    storage: Storage,
+) -> FileResponse:
+    _row, job = await dispatch_artifact_access(
+        session, bridge, authorization_id, enabled=settings.printer_dispatch_enabled
+    )
+    items, _ = await manifest(session, job)
+    response = await artifact_response(job.id, items[0].id, session, storage)
+    try:
+        await dispatch_artifact_access(
+            session, bridge, authorization_id, enabled=settings.printer_dispatch_enabled
+        )
+    except Exception:
+        if response.background:
+            await response.background()
+        raise
+    return response
+
+
+@router.post("/bridge/dispatches/{authorization_id}/events")
+async def station_event(
+    authorization_id: UUID,
+    payload: DispatchEventInput,
+    bridge: BridgePrincipal,
+    session: DatabaseSession,
+    settings: RuntimeSettings,
+) -> dict[str, object]:
+    job = await record_dispatch_event(
+        session,
+        bridge,
+        authorization_id,
+        payload.model_dump(mode="json", by_alias=True),
+        enabled=settings.printer_dispatch_enabled,
+    )
+    return {"jobId": str(job.id), "status": job.status}
 
 
 @router.get("/bridge/handoffs/{authorization_id}/artifacts/{item_id}")

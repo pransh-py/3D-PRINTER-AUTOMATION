@@ -10,6 +10,7 @@ const eslintConfig = defineConfig([
     // Default ignores of eslint-config-next:
     ".next/**",
     ".next-verification/**",
+    ".next-station-verification/**",
     ".next-print-station/**",
     "out/**",
     "build/**",

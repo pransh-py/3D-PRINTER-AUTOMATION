@@ -78,7 +78,7 @@ export function OwnerModelReview({
   return (
     <section aria-label={`Review ${asset.filename}`}>
       <div className={styles.actions}>
-        <a href={url}>Download validated source: {asset.filename}</a>
+        <a href={url}>Download {asset.filename}</a>
         {previewable && !file ? (
           <button
             type="button"
@@ -86,8 +86,8 @@ export function OwnerModelReview({
             onClick={() => void inspect()}
           >
             {loading
-              ? "Loading private model…"
-              : `Inspect 3D model: ${asset.filename}`}
+              ? "Loading model…"
+              : `Preview ${asset.filename}`}
           </button>
         ) : null}
         {file ? (

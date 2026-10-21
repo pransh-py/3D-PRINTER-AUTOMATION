@@ -95,7 +95,12 @@ class Settings(BaseSettings):
     smtp_starttls: bool = False
     smtp_use_tls: bool = False
     smtp_timeout_seconds: float = Field(default=10.0, gt=0, le=30)
+    whatsapp_otp_enabled: bool = False
+    whatsapp_otp_sender_url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:3201")
+    whatsapp_otp_sender_api_key: SecretStr | None = None
+    whatsapp_otp_timeout_seconds: float = Field(default=20, gt=0, le=30)
     workflow_notifications_enabled: bool = False
+    printer_dispatch_enabled: bool = False
     notification_max_attempts: int = Field(default=5, ge=1, le=10)
     email_verification_ttl_hours: int = Field(default=24, ge=1, le=72)
     password_reset_ttl_minutes: int = Field(default=30, ge=10, le=60)
@@ -111,12 +116,24 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_production_safety(self) -> "Settings":
         """Refuse configuration that would weaken production boundaries."""
+        if self.whatsapp_otp_enabled:
+            if self.environment == "production":
+                raise ValueError("local-only sender not approved for production")
+            url = self.whatsapp_otp_sender_url
+            if (url.scheme != "http" or url.host != "127.0.0.1" or url.path not in {None, "/"}
+                    or url.username or url.password or url.query or url.fragment):
+                raise ValueError("WhatsApp OTP requires a fixed loopback HTTP sender origin")
+            key = self.whatsapp_otp_sender_api_key
+            if key is None or len(key.get_secret_value().encode()) < 32 or key in {
+                self.jwt_signing_secret, self.token_hash_secret, self.mfa_encryption_secret
+            }:
+                raise ValueError("WhatsApp OTP requires a separate strong sender key")
         if self.storage_backend == "local":
             if self.environment not in {"development", "test"}:
                 raise ValueError("local model storage is only for development/test")
             if not self.storage_local_directory or not self.storage_local_directory.is_absolute():
                 raise ValueError("local model storage requires an absolute private directory")
-            loopback = {"127.0.0.1", "localhost", "::1"}
+            loopback = {"127.0.0.1", "localhost", "::1", "[::1]"}
             if self.public_web_url.host not in loopback or any(
                 AnyHttpUrl(origin).host not in loopback for origin in self.allowed_origins
             ):

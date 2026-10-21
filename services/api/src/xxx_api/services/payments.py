@@ -134,7 +134,7 @@ async def create_checkout(
     if (
         buyer.role is not Role.BUYER
         or buyer.status is not UserStatus.ACTIVE
-        or buyer.email_verified_at is None
+        or not buyer.contact_verified
     ):
         raise WorkflowConflictError("A verified buyer account is required.")
     configured(settings)

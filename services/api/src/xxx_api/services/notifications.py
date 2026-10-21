@@ -140,6 +140,7 @@ def _eligible(user: User | None, code: str) -> bool:
     return bool(
         user
         and user.status is UserStatus.ACTIVE
+        and user.email
         and user.email_verified_at
         and user.role is TEMPLATES[code][0]
     )
@@ -202,7 +203,7 @@ async def publish_notifications(
                     template_version="1",
                     channel="email",
                     destination_digest=_destination(
-                        settings, user.email if user else str(recipient_id)
+                        settings, (user.email or str(user.id)) if user else str(recipient_id)
                     ),
                     status="pending" if eligible else "dead_lettered",
                     available_at=now,
@@ -290,10 +291,10 @@ async def deliver_notifications(
             elif not _eligible(user, row.template_code):
                 error_code = "recipient_unavailable"
             elif user and not compare_digest(
-                row.destination_digest, _destination(settings, user.email)
+                row.destination_digest, _destination(settings, user.email or str(user.id))
             ):
                 error_code = "recipient_changed"
-            recipient = user.email if user else ""
+            recipient = (user.email or "") if user else ""
             template = TEMPLATES.get(row.template_code)
             await session.commit()  # Release all DB locks before the external SMTP boundary.
         count += 1

@@ -11,6 +11,7 @@ import {
 } from "@/lib/auth-api";
 
 import styles from "./auth-form.module.css";
+import { roleHome } from "@/lib/dashboard-api";
 import { OwnerMfaPanel } from "./owner-mfa-panel";
 
 export function AccountPanel() {
@@ -18,6 +19,8 @@ export function AccountPanel() {
   const [loading, setLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -30,10 +33,13 @@ export function AccountPanel() {
       })
       .catch((caught: unknown) => {
         if (active) {
+          const signedOut =
+            caught instanceof AuthApiError && caught.status === 401;
+          setNeedsSignIn(signedOut);
           setError(
-            caught instanceof AuthApiError
-              ? caught.message
-              : "Your account could not be loaded.",
+            signedOut
+              ? "Please sign in to view your account."
+              : "We couldn’t confirm your account right now. You have not been signed out.",
           );
         }
       })
@@ -45,7 +51,7 @@ export function AccountPanel() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [attempt]);
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -62,7 +68,7 @@ export function AccountPanel() {
   }
 
   if (loading) {
-    return <p className={styles.status}>Loading your protected account…</p>;
+    return <p className={styles.status}>Loading your account…</p>;
   }
 
   if (user === null) {
@@ -71,9 +77,14 @@ export function AccountPanel() {
         <p className={styles.error} role="alert">
           {error ?? "Please sign in to view this page."}
         </p>
-        <Link className={styles.submitLink} href="/sign-in">
-          Go to sign in
-        </Link>
+        {needsSignIn ? (
+          <Link className={styles.submitLink} href="/sign-in">Go to sign in</Link>
+        ) : (
+          <button className={styles.submit} type="button" onClick={() => {
+            setLoading(true);
+            setAttempt((value) => value + 1);
+          }}>Try again</button>
+        )}
       </div>
     );
   }
@@ -85,19 +96,22 @@ export function AccountPanel() {
           <dt>Name</dt>
           <dd>{user.displayName}</dd>
         </div>
-        <div>
+        {user.email ? <div>
           <dt>Email</dt>
           <dd>{user.email}</dd>
-        </div>
+        </div> : null}
+        {user.phone ? <div>
+          <dt>WhatsApp number — verified</dt>
+          <dd>{user.phone}</dd>
+        </div> : null}
         <div>
           <dt>Role</dt>
           <dd>{user.role === "owner" ? "Business owner" : "Buyer"}</dd>
         </div>
       </dl>
-      <p className={styles.help}>Protected account and business operations.</p>
       {user.role === "owner" && <OwnerMfaPanel />}
-      <Link href={user.role === "owner" ? "/operations" : "/orders"}>
-        {user.role === "owner" ? "Open operations workspace" : "View quotations & orders"}
+      <Link href={roleHome(user.role)}>
+        Open your dashboard
       </Link>
       {error && (
         <p className={styles.error} role="alert">

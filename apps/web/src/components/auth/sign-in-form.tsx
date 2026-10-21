@@ -5,10 +5,25 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
 import { AuthApiError, completeMfaLogin, loginBuyer } from "@/lib/auth-api";
+import { roleHome } from "@/lib/dashboard-api";
+import { PhoneOtpForm } from "./phone-otp-form";
 
 import styles from "./auth-form.module.css";
 
 export function SignInForm() {
+  const [method, setMethod] = useState<"phone" | "email">("phone");
+  return <div className={styles.form}>
+    <div className={styles.submitRow} aria-label="Sign-in method">
+      <button type="button" className={method === "phone" ? styles.submit : styles.secondaryButton} aria-pressed={method === "phone"}
+        onClick={() => setMethod("phone")}>WhatsApp code</button>
+      <button type="button" className={method === "email" ? styles.submit : styles.secondaryButton} aria-pressed={method === "email"}
+        onClick={() => setMethod("email")}>Email &amp; password (owner / existing accounts)</button>
+    </div>
+    {method === "phone" ? <PhoneOtpForm mode="login" /> : <EmailSignInForm />}
+  </div>;
+}
+
+function EmailSignInForm() {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +45,7 @@ export function SignInForm() {
         setPending(false);
         return;
       }
-      router.replace("/account");
+      router.replace(roleHome(result.user.role));
       router.refresh();
     } catch (caught) {
       setError(
@@ -51,9 +66,9 @@ export function SignInForm() {
     setError(null);
     const data = new FormData(event.currentTarget);
     try {
-      await completeMfaLogin(challenge, String(data.get("code") ?? ""));
+      const user = await completeMfaLogin(challenge, String(data.get("code") ?? ""));
       setChallenge(null);
-      router.replace("/account");
+      router.replace(roleHome(user.role));
       router.refresh();
     } catch (caught) {
       setError(

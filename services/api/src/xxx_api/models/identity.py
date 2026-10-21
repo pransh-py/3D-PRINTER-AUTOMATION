@@ -19,6 +19,7 @@ from sqlalchemy import (
     Uuid,
     event,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,11 +43,34 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "(role = 'buyer' AND owner_slot IS NULL)",
             name="ck_users_owner_slot",
         ),
+        CheckConstraint(
+            "(email IS NOT NULL AND password_hash IS NOT NULL) OR phone_e164 IS NOT NULL",
+            name="ck_users_credentials",
+        ),
+        CheckConstraint(
+            "role <> 'owner' OR (email IS NOT NULL AND password_hash IS NOT NULL "
+            "AND phone_e164 IS NULL)",
+            name="ck_users_owner_email_only",
+        ),
+        CheckConstraint(
+            "email_verified_at IS NULL OR email IS NOT NULL", name="ck_users_email_verified"
+        ),
+        CheckConstraint(
+            "(phone_e164 IS NULL AND phone_verified_at IS NULL) OR "
+            "(phone_e164 IS NOT NULL AND phone_verified_at IS NOT NULL)",
+            name="ck_users_phone_verified",
+        ),
+        CheckConstraint(
+            "phone_e164 IS NULL OR (length(phone_e164) = 13 AND substr(phone_e164, 1, 3) = '+91')",
+            name="ck_users_phone_format",
+        ),
     )
 
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
+    email: Mapped[str | None] = mapped_column(String(320), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(Text)
+    phone_e164: Mapped[str | None] = mapped_column(String(16), unique=True, index=True)
+    phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     role: Mapped[Role] = mapped_column(
         Enum(
             Role,
@@ -90,6 +114,39 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     mfa_method: Mapped[MfaMethod | None] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
+
+    @property
+    def contact_verified(self) -> bool:
+        return self.email_verified_at is not None or self.phone_verified_at is not None
+
+
+class PhoneOtpChallenge(UUIDPrimaryKeyMixin, Base):
+    """Bounded phone proof. Only keyed digests are stored for codes and handles."""
+
+    __tablename__ = "phone_otp_challenges"
+    __table_args__ = (
+        CheckConstraint("purpose IN ('signup','login')", name="ck_phone_otp_challenges_purpose"),
+        CheckConstraint("attempt_count BETWEEN 0 AND 5", name="ck_phone_otp_challenges_attempts"),
+        Index(
+            "uq_phone_otp_active_phone",
+            "phone_e164",
+            unique=True,
+            sqlite_where=text("consumed_at IS NULL"),
+            postgresql_where=text("consumed_at IS NULL"),
+        ),
+    )
+    challenge_digest: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    phone_e164: Mapped[str] = mapped_column(String(16), index=True, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(100))
+    code_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    attempt_count: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True, nullable=False
+    )
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RefreshSession(UUIDPrimaryKeyMixin, Base):

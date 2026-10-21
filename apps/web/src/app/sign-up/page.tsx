@@ -12,7 +12,7 @@ export default function SignUpPage() {
     <AuthShell
       kicker="CREATE AN ACCOUNT"
       title="Create your account"
-      description="Buyer accounts get private model storage, reviewed quotes, UPI payment tracking, and order updates from queue to delivery."
+      description="Upload models, get reviewed quotations and follow your orders."
       footerLinks={[
         { label: "Already have an account? Sign in", href: "/sign-in" },
       ]}

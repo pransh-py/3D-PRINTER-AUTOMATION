@@ -2,7 +2,8 @@ const AUTH_API_BASE = "/api/v1/auth";
 
 export type AuthenticatedUser = Readonly<{
   id: string;
-  email: string;
+  email: string | null;
+  phone: string | null;
   displayName: string;
   role: "buyer" | "owner";
 }>;
@@ -55,7 +56,9 @@ function authenticatedUser(payload: unknown): AuthenticatedUser {
   if (
     !isRecord(payload) ||
     typeof payload.id !== "string" ||
-    typeof payload.email !== "string" ||
+    (typeof payload.email !== "string" && payload.email !== null) ||
+    (payload.phone !== undefined && payload.phone !== null &&
+      (typeof payload.phone !== "string" || !/^\+91[6-9][0-9]{9}$/.test(payload.phone))) ||
     typeof payload.displayName !== "string" ||
     (payload.role !== "buyer" && payload.role !== "owner")
   ) {
@@ -64,6 +67,7 @@ function authenticatedUser(payload: unknown): AuthenticatedUser {
   return {
     id: payload.id,
     email: payload.email,
+    phone: typeof payload.phone === "string" ? payload.phone : null,
     displayName: payload.displayName,
     role: payload.role,
   };
@@ -184,6 +188,46 @@ export async function registerBuyer(input: {
   password: string;
 }): Promise<MessageResponse> {
   return request<MessageResponse>("/register", { method: "POST", body: input });
+}
+
+export function toIndianMobileE164(input: string): string | null {
+  const value = input.replace(/[\s-]/g, "");
+  if (/^[6-9][0-9]{9}$/.test(value)) return `+91${value}`;
+  return /^\+91[6-9][0-9]{9}$/.test(value) ? value : null;
+}
+
+export type PhoneChallenge = Readonly<{
+  challenge: string;
+  expiresInSeconds: number;
+  resendAfterSeconds: number;
+}>;
+
+export async function requestPhoneCode(input: {
+  phone: string; purpose: "signup" | "login"; displayName?: string;
+}): Promise<PhoneChallenge> {
+  if (!/^\+91[6-9][0-9]{9}$/.test(input.phone)) throw new AuthApiError("Enter a valid Indian mobile number.", 400);
+  const payload = await request<unknown>("/phone/request", { method: "POST", body: input });
+  if (!isRecord(payload) || typeof payload.challenge !== "string"
+    || !/^[A-Za-z0-9_-]{32,512}$/.test(payload.challenge)
+    || typeof payload.expiresInSeconds !== "number" || !Number.isInteger(payload.expiresInSeconds)
+    || payload.expiresInSeconds < 1 || payload.expiresInSeconds > 300
+    || typeof payload.resendAfterSeconds !== "number" || !Number.isInteger(payload.resendAfterSeconds)
+    || payload.resendAfterSeconds < 1 || payload.resendAfterSeconds > 60) {
+    throw new AuthApiError("The account service returned an invalid response.", 502);
+  }
+  return { challenge: payload.challenge, expiresInSeconds: payload.expiresInSeconds,
+    resendAfterSeconds: payload.resendAfterSeconds };
+}
+
+export async function verifyPhoneCode(challenge: string, code: string): Promise<AuthenticatedUser> {
+  if (!/^[A-Za-z0-9_-]{32,512}$/.test(challenge) || !/^[0-9]{6}$/.test(code)) {
+    throw new AuthApiError("Enter the six-digit code from WhatsApp.", 400);
+  }
+  const user = authenticatedUser(await request<unknown>("/phone/verify", {
+    method: "POST", body: { challenge, code },
+  }));
+  if (user.role !== "buyer" || !user.phone) throw new AuthApiError("The account service returned an invalid response.", 502);
+  return user;
 }
 
 export async function loginBuyer(input: {

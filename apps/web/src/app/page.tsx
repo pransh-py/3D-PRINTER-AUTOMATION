@@ -3,6 +3,7 @@ import Link from "next/link";
 import { SiteHeader } from "@/components/site-header";
 import { MaterialExplorer } from "@/components/home-interactions";
 import { UiIcon } from "@/components/ui-icon";
+import { printEntry } from "@/lib/print-entry";
 import styles from "./home.module.css";
 
 const QUESTIONS = [
@@ -29,9 +30,35 @@ const QUESTIONS = [
 ];
 
 export default function Home() {
+  const stationMode = process.env.PRINTFLOW_PRINT_STATION === "1";
+  const entry = printEntry(stationMode);
+  const questions = stationMode
+    ? QUESTIONS
+    : [
+        [
+          "What files can I upload?",
+          "Upload STL, OBJ, 3MF, STEP or STP files, up to five models and 100 MiB per file. STL and OBJ use millimetres. We check your models before issuing a final quotation.",
+        ],
+        [
+          "How do I choose a material?",
+          "Choose from the approved print profiles and colours shown in your request. Our team reviews suitability and availability before issuing your quotation.",
+        ],
+        [
+          "When will I see the price?",
+          "After model checks and slicing, the owner reviews the estimate and sends a final quotation. Review its print and delivery charges before accepting and paying.",
+        ],
+        [
+          "Will uploading start the printer?",
+          "No. Uploading only requests a quotation. Printing begins after you accept it and payment is confirmed.",
+        ],
+        [
+          "Can I order more than one copy?",
+          "Yes. Set the number of copies in your request. We review production requirements before quoting.",
+        ],
+      ];
   return (
     <div className={styles.home} id="top">
-      <SiteHeader />
+      <SiteHeader startHref={entry} />
       <main id="main-content">
         <section className={styles.hero} aria-labelledby="hero-title">
           <div className={styles.heroCopy}>
@@ -56,7 +83,7 @@ export default function Home() {
               form all your own.
             </p>
             <div className={styles.heroActions}>
-              <Link className={styles.primary} href="/print">
+              <Link className={styles.primary} href={entry}>
                 Start a print
                 <UiIcon name="arrow-up" />
               </Link>
@@ -119,7 +146,7 @@ export default function Home() {
           <div className={styles.applicationGrid}>
             <article data-reveal>
               <Link
-                href="/print"
+                href={entry}
                 className={styles.applicationImage}
                 aria-label="Start a functional prototype"
               >
@@ -145,7 +172,7 @@ export default function Home() {
             </article>
             <article className={styles.architecture} data-reveal>
               <Link
-                href="/print"
+                href={entry}
                 className={styles.applicationImage}
                 aria-label="Start an architectural or display model"
               >
@@ -187,7 +214,7 @@ export default function Home() {
               Find a starting point for your part.
             </p>
           </div>
-          <MaterialExplorer />
+          <MaterialExplorer stationMode={stationMode} />
         </section>
 
         <section
@@ -206,8 +233,8 @@ export default function Home() {
               <br />
               The workspace handles the details.
             </p>
-            <Link className={styles.lightButton} href="/print">
-              Open print workspace
+            <Link className={styles.lightButton} href={entry}>
+              {stationMode ? "Open print workspace" : "Start your print request"}
               <UiIcon name="arrow-up" />
             </Link>
           </div>
@@ -217,8 +244,9 @@ export default function Home() {
               <div>
                 <h3>Bring your model.</h3>
                 <p>
-                  Upload an STL or OBJ. Explore the preview and check its size
-                  and orientation.
+                  {stationMode
+                    ? "Upload an STL or OBJ. Explore the preview and check its size and orientation."
+                    : "Upload your model privately. Explore the preview and check its dimensions before submitting."}
                 </p>
               </div>
             </li>
@@ -227,19 +255,22 @@ export default function Home() {
               <div>
                 <h3>Make it your own.</h3>
                 <p>
-                  Choose a material, colour and layer height. Set the infill,
-                  supports and number of copies.
+                  {stationMode
+                    ? "Choose a material, colour and layer height. Set the infill, supports and number of copies."
+                    : "Select an approved material, colour and print profile, then choose copies and delivery."}
                 </p>
               </div>
             </li>
             <li data-reveal>
               <UiIcon name="cube" />
               <div>
-                <h3>Slice. Review. Print.</h3>
+                <h3>
+                  {stationMode ? "Slice. Review. Print." : "Review. Order. Follow along."}
+                </h3>
                 <p>
-                  See the slicer’s time and filament estimate. A prepared
-                  printer and operator confirmation come before any physical
-                  start.
+                  {stationMode
+                    ? "See the slicer’s time and filament estimate. A prepared printer and operator confirmation come before any physical start."
+                    : "Accept your reviewed quotation and complete payment. The owner prepares your print; follow production and handover in your dashboard."}
                 </p>
               </div>
             </li>
@@ -264,7 +295,7 @@ export default function Home() {
             </p>
           </div>
           <div className={styles.questionList}>
-            {QUESTIONS.map(([question, answer]) => (
+            {questions.map(([question, answer]) => (
               <details key={question} data-reveal>
                 <summary>
                   {question}
@@ -288,7 +319,7 @@ export default function Home() {
               <br />
               See what you can make.
             </p>
-            <Link className={styles.primary} href="/print">
+            <Link className={styles.primary} href={entry}>
               Let’s make it real
               <UiIcon name="arrow-up" />
             </Link>
@@ -299,7 +330,7 @@ export default function Home() {
         <div className={styles.footerTop}>
           <p>3D printing, made in Chennai.</p>
           <nav aria-label="Footer navigation">
-            <Link href="/print">Print workspace</Link>
+            <Link href={entry}>{stationMode ? "Print workspace" : "Start a print"}</Link>
             <Link href="/get-a-quote">Request a quote</Link>
             <Link href="/orders">My orders</Link>
             <a href="#top">

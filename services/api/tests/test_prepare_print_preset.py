@@ -3,7 +3,6 @@
 import json
 
 import pytest
-
 from tools.prepare_print_preset import compile_profiles, resolve_profile
 
 

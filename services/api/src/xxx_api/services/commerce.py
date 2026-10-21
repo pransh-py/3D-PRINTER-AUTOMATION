@@ -362,7 +362,7 @@ async def accept_quote(
     address: dict[str, object] | None = None,
     now: datetime | None = None,
 ) -> Order:
-    if buyer.role is not Role.BUYER or buyer.email_verified_at is None:
+    if buyer.role is not Role.BUYER or not buyer.contact_verified:
         raise WorkflowNotFoundError
     quote = await visible_quote(session, buyer, quote_id)
     existing = await session.scalar(select(Order).where(Order.accepted_quote_id == quote_id))
@@ -727,7 +727,7 @@ JOB_ACTIONS: dict[str, tuple[set[str], str, str]] = {
     "release": ({"on_hold"}, "queued", "queued"),
     "manual_started": ({"ready_to_print"}, "printing", "printing"),
     "print_completed": ({"printing"}, "qa", "qa"),
-    "print_failed": ({"printing"}, "failed", "print_failed"),
+    "print_failed": ({"printing", "claimed"}, "failed", "print_failed"),
     "qa_pass": ({"qa"}, "completed", "qa"),
     "qa_fail": ({"qa"}, "failed", "print_failed"),
 }

@@ -1,0 +1,34 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.45;
+  white-space: normal;
+}
+.dot {
+  height: 6px;
+  width: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.badge[data-tone="action"],
+.badge[data-tone="attention"] {
+  color: var(--link);
+  border-color: color-mix(in srgb, var(--orange) 40%, var(--line));
+}
+.badge[data-tone="progress"],
+.badge[data-tone="success"] {
+  color: var(--ink);
+}
+.badge[data-tone="success"] .dot {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
+}

@@ -1,5 +1,56 @@
 # `xxx` Product Requirements
 
+## Ordering workflow polish — October 21, 2026
+
+The buyer journey uses a guided model → approved print options → delivery → review request,
+followed by the existing owner-issued quotation → acceptance → payment → production → handover.
+The layout takes its upload/preview and progressive-configuration cues from
+[Robu's FDM service](https://robu.in/product/3d-printing-service1/), without copying its branding,
+prices, inventory, capacity, lead times or policies. Material, quality, infill, supports and
+colour must still describe a profile actually returned by the approved commerce catalogue.
+The request has no independent units/orientation or infill control that the commercial API
+does not persist. All models share its saved specification, with 1–100 copies per model.
+
+Owner review and accepted-price snapshots remain authoritative. Immediate cart checkout is
+deferred: it requires approved commerce rates, tax treatment, delivery charges and auto-approval
+rules. Local station rates are not a substitute for those decisions. Submitting is not payment,
+and a browser callback is not proof of capture. The buyer can review a final quotation, supply
+a delivery address when required, accept, then continue to the existing checkout controls.
+
+The owner has separate workflow/setup navigation, loaded-list triage/search and expandable
+model/pricing decisions. Buyer order filters, progress and next actions are derived from stored
+server state; unknown states never imply payment or printing success. Real printer dispatch,
+profiles, stock configuration, policies, credentials and provisioning are unchanged.
+
+## Buyer and owner dashboards — October 21, 2026
+
+The owner requested role-based business dashboards and explicitly required the newest GitHub
+`main` as the implementation baseline. The dashboard work builds on `d826901`, preserving its
+redesigned public site and commissioned local printing workflow. The buyer home is `/orders`;
+the primary owner's home is `/operations`. Both use the current shared site header.
+
+Buyers see only their private model requests, valid final quotations, payments due/processing,
+production and handover progress. The owner sees stored request/order/job counts, decisions
+requiring attention, configuration and shortcuts to the existing request, production, payment,
+fulfilment, pricing and notification tools. Counts cover all stored records, not capped lists.
+Empty accounts, disabled payments and Test Mode are explicit. No invented revenue, stock,
+customer directory or printer status is presented.
+
+The existing cookie/session API remains the authorization boundary. Public registration creates
+buyers only; the single owner is provisioned administratively. Buyer summary counts are scoped
+to the current buyer identity, owner counts require the primary owner, and consequential owner
+actions retain origin, CSRF and recent-MFA checks. A dashboard resolves the server-verified
+account before rendering its role-specific shell or loading records. Wrong-role URLs redirect
+automatically to that account's dashboard; unauthenticated visitors redirect to sign-in.
+Service failures offer retry without pretending the account signed out. Public signup remains
+buyer-only: email verification and sign-in lead to `/orders`; the provisioned owner uses MFA
+and `/operations`. There are no tenants, subscriptions or employee-role framework.
+
+This feature does not alter `/print`, native dispatch, filament slots, profiles, local rates or
+commissioning approvals below. The approved local station rates are distinct from the commerce
+quotation rate card; they are not silently imported into buyer quotations. Existing business
+policy, gateway and physical-safety boundaries remain in force.
+
 ## Current scope override — October 19, 2026
 
 The owner explicitly deferred business/SaaS work: build a local single-printer station that
@@ -429,3 +480,31 @@ implemented behavior; acceptance criteria above describe the intended production
 6. Business legal entity/GST status, terms, privacy/retention period, prohibited content, refund/cancellation, and liability wording.
 7. Windows version, Orca-Flashforge installation, AD5X firmware, LAN/WAN mode, Printer ID pairing, and hardware test access.
 8. Domain, email sender, support contact, branding, and owner-supplied portfolio content.
+
+## Demo acceptance addendum — October 21, 2026
+
+The current delivery follows the initial buyer/owner architecture without replacing the
+commissioned `d826901` printer automation. Public **Start a print** links enter `/get-a-quote`;
+ordinary-site `/print` links redirect there. Buyers register and verify their own accounts,
+upload privately, configure an available profile, accept an owner-issued quotation and pay.
+Only a server-correlated captured payment releases a production job. No role picker or buyer
+printer controls are introduced.
+
+The owner reserves the next job, reviews its immutable G-code, confirms physical readiness and
+authorizes one send using recent MFA. The separately paired local station checks the approved
+commerce profile hash, plate, material, colour mapping, artifact hash and live printer readiness.
+Its existing driver sends the file once. Exact-file telemetry updates that same buyer order;
+printer completion advances to QA, not delivery. QA and pickup/delivery remain owner decisions.
+
+For this bounded version, automatic dispatch supports **one model file, one copy** only.
+Multi-file/multi-copy orders retain the manual workflow and show an explicit manual-handoff
+reason. No model or copy may be silently omitted. There is no automatic resend or next plate.
+Dispatch is disabled by default. Native station behavior, payment processing and migrations are
+preserved; a new outbound adapter connects them rather than refactoring the actuator.
+
+The demo uses actual local uploads and OrcaSlicer, fictional rates and an in-process fictional
+payment provider, with a loopback printer simulator labelled as such. These are not approved
+selling prices, a live Razorpay integration test, or proof of a physical print. Before physical
+activation, review each exact commerce profile/colour/plate against the commissioned station
+and perform a supervised test with the owner beside the AD5X. See `LOCAL_WORKFLOW.md` for
+verification and `SECURITY.md` for the authorization boundary.

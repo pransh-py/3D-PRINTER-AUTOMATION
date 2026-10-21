@@ -1,8 +1,9 @@
 """Public identity API schemas."""
 
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from xxx_api.domain.roles import Role
 
@@ -103,6 +104,36 @@ class AuthenticatedUserResponse(AuthSchema):
     """Safe current-user fields; no token or credential state."""
 
     id: UUID
-    email: EmailStr
+    email: EmailStr | None
+    phone: str | None = None
     display_name: str = Field(alias="displayName")
     role: Role
+
+
+class PhoneCodeRequest(AuthSchema):
+    phone: str = Field(pattern=r"^\+91[6-9][0-9]{9}$")
+    purpose: Literal["signup", "login"]
+    display_name: str | None = Field(
+        default=None, alias="displayName", min_length=1, max_length=100
+    )
+
+    @model_validator(mode="after")
+    def validate_purpose(self) -> "PhoneCodeRequest":
+        if self.purpose == "signup":
+            if not self.display_name or not self.display_name.strip():
+                raise ValueError("Signup requires your name")
+            self.display_name = " ".join(self.display_name.split())
+        elif self.display_name is not None:
+            raise ValueError("Login does not accept profile changes")
+        return self
+
+
+class PhoneCodeVerifyRequest(AuthSchema):
+    challenge: str = Field(min_length=32, max_length=512)
+    code: str = Field(pattern=r"^[0-9]{6}$")
+
+
+class PhoneChallengeResponse(AuthSchema):
+    challenge: str
+    expires_in_seconds: int = Field(default=300, alias="expiresInSeconds")
+    resend_after_seconds: int = Field(default=60, alias="resendAfterSeconds")

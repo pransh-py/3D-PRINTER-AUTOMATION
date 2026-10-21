@@ -53,9 +53,8 @@ export function PaymentPanel({
     <section aria-label="Payment exceptions">
       <h2>Payments & reconciliation</h2>
       <p>
-        Provider capture evidence confirms payment. This screen cannot mark an
-        order paid manually. Refunds and manual-UPI fallback are unavailable
-        until their rules are approved.
+        Payments are confirmed by Razorpay. Orders can’t be marked paid manually,
+        and refunds and manual UPI aren’t available yet.
       </p>
       <button disabled={busy} onClick={() => void refresh()}>
         Refresh payments

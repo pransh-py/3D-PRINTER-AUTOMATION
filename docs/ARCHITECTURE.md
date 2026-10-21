@@ -6,6 +6,26 @@ Keep public web traffic, untrusted model processing, the Razorpay provider bound
 
 ## Canonical data and flow contracts
 
+The October 21 role dashboards extend the commerce workflow on GitHub main `d826901`, not a
+replacement for its redesigned storefront or local station. `GET /api/v1/buyer/dashboard`
+requires a database-validated buyer principal and scopes request/order/unexpired-issued-quotation
+counts to that buyer. `GET /api/v1/owner/dashboard` requires the primary owner and adds global
+job, payment-intent, fulfilment and notification status counts plus non-secret setup booleans.
+Both are read-only, rate-limited, no-store aggregates. They return no record IDs, buyer identity,
+addresses, filenames, money totals or machine status. No tables or migrations are added.
+
+The browser checks the existing cookie/session API before fetching records. Password and MFA
+login results choose `/orders` or `/operations` from the returned role; a mismatch offers the
+correct dashboard without fetching lists. These UI checks do not replace API authorization.
+The shared `SiteHeader` accepts an optional presentation-only dashboard role; without it, the
+public homepage and print workspace render their existing navigation unchanged. The skip link
+targets the dashboard's focusable main region. The design uses existing appearance variables.
+
+The commerce quotation policy remains separate from approved local print-station rates. No
+public dashboard route connects to native printer controls, and no commissioning/settings
+changes are introduced. The permission boundaries follow [OWASP authorization guidance](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html):
+deny by default and validate permissions for each request.
+
 The implementation currently delivers the local/manual slice described in
 [`LOCAL_WORKFLOW.md`](LOCAL_WORKFLOW.md). Razorpay and workflow SMTP have implemented,
 disabled-by-default adapters tested with fictional payment state and a local mail sink. Direct
@@ -265,3 +285,43 @@ preparation context, file hashes and live printer readiness, then sends the orig
 prepared artifact under the usual durable start intent. No second upload, slice or
 price calculation occurs. Retries return the existing authorization without dispatch;
 changed authorizations and any previously started estimate cannot start again.
+
+## Order-to-station adapter — October 21, 2026
+
+The commerce application and the native station remain separate. Browser buyers use authenticated
+ordering APIs; only the owner uses production authorization. The station makes outbound,
+credential-scoped requests and is not exposed through the ordinary website's printer proxy.
+Existing native station/driver/slicer code is unchanged from the recorded working baseline.
+
+No migration is needed: `BridgeInstallation.adapter_name` selects `manual-orca` or
+`station-zmod-v1`; `PrintAuthorization` binds the owner, readiness check, printer and manifest;
+append-only `PrintJobEvent` rows carry `plate_*` observations. Authorization and the job's
+`ready_to_print -> authorized` transition commit together. A compare-and-swap claim consumes the
+grant once and moves the job to `claimed`; repeated claims return the same approved payload.
+
+Owner `GET/POST /api/v1/owner/production/{job_id}/dispatch` reports eligibility/connectivity and
+issues a two-minute authorization. The station's `/api/v1/bridge/dispatches` endpoints list,
+claim, download and report observations. Downloads are hash-verified and rechecked after I/O.
+The server acknowledges the durable `sent` intent before any upload; that label means
+"preparing to print" to the buyer, not successful printer execution.
+
+`services/bridge/commerce_connector.py` imports a single approved G-code plate into the existing
+local journal. `tools/run_commerce_station.py` holds the same `station.lock` as the native runner
+and exposes the unchanged local app/monitor. A separately private connector configuration stores
+the API credential and approved commerce profile hashes/plate types. It never edits native
+configuration. Native `/start` cannot validate a commerce row's display-only options.
+
+The physical boundary is: local durable intent -> API acknowledgement -> exactly one existing
+`upload_and_print` call. Transport failure or restart after intent requires inspection, never
+resending. Exact filenames and wire hashes bind subsequent observations. Confirmed completion
+sets job/order to `qa` and releases the reservation; the owner still passes QA and records
+fulfilment. Progress observations are deduplicated in ten-percent buckets and exact outbound
+event bodies survive API outages. Cancellation/uncertainty are observations, not assumed success.
+
+The owner status payload includes the latest grant's `claimedAt`, `revokedAt` and `expiresAt`.
+An expired or revoked **unclaimed** grant can be cancelled even while sending is disabled.
+A conditional grant update and job/order version checks ensure cancellation and claim cannot
+both win. The reset retains the reservation, returns to preparation, records audit/notice
+evidence and requires fresh readiness. The owner panel handles only the explicit
+`authorization_reset_readiness_required` response as successful recovery. Claimed attempts
+cannot take this path.

@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 import { UiIcon } from "./ui-icon";
+import { printEntry } from "@/lib/print-entry";
 import styles from "@/app/home.module.css";
 
 const MATERIALS = {
@@ -33,7 +34,11 @@ const COLOURS: Record<string, string> = {
   orange: "#f46526",
 };
 
-export function MaterialExplorer() {
+export function MaterialExplorer({
+  stationMode = false,
+}: {
+  stationMode?: boolean;
+}) {
   const [material, setMaterial] = useState<keyof typeof MATERIALS>("PLA");
   const [colour, setColour] = useState("red");
   const selected = MATERIALS[material];
@@ -106,9 +111,13 @@ export function MaterialExplorer() {
         </div>
         <Link
           className={styles.textLink}
-          href={`/print?material=${material}&colour=${colour}`}
+          href={
+            stationMode
+              ? `/print?material=${material}&colour=${colour}`
+              : printEntry()
+          }
         >
-          Print with {material}
+          {stationMode ? `Print with ${material}` : "Explore available print options"}
           <UiIcon name="arrow" />
         </Link>
       </div>

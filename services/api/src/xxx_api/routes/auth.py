@@ -13,11 +13,13 @@ from xxx_api.dependencies import (
     OwnerPrincipal,
     SessionCsrf,
     get_email_sender,
+    get_phone_otp_sender,
     get_rate_limiter,
     get_runtime_settings,
     require_trusted_origin,
 )
 from xxx_api.email import EmailDeliveryError, EmailSender
+from xxx_api.phone_otp import PhoneOtpDeliveryError, PhoneOtpSender
 from xxx_api.rate_limit import (
     RateLimiter,
     RateLimitExceededError,
@@ -36,6 +38,9 @@ from xxx_api.schemas.auth import (
     OwnerMfaEnrollmentRequest,
     OwnerMfaEnrollmentResponse,
     OwnerMfaStatusResponse,
+    PhoneChallengeResponse,
+    PhoneCodeRequest,
+    PhoneCodeVerifyRequest,
     RegisterRequest,
     ResetPasswordRequest,
     TokenRequest,
@@ -74,6 +79,14 @@ from xxx_api.services.owner_security import (
     owner_mfa_enabled,
     start_owner_mfa_enrollment,
 )
+from xxx_api.services.phone_auth import (
+    InvalidPhoneCodeError,
+    PhoneAccountNotFoundError,
+    PhoneOtpCooldownError,
+    PhoneVerificationConflictError,
+    issue_phone_challenge,
+    verify_phone_challenge,
+)
 
 router = APIRouter(prefix="/auth", tags=["identity"])
 logger = logging.getLogger("xxx_api.identity")
@@ -83,6 +96,101 @@ EmailAdapter = Annotated[EmailSender, Depends(get_email_sender)]
 Limiter = Annotated[RateLimiter, Depends(get_rate_limiter)]
 
 GENERIC_ACCOUNT_MESSAGE = "If the account is eligible, instructions will be sent."
+WHATSAPP_UNAVAILABLE = "WhatsApp verification is temporarily unavailable. Please try again shortly."
+PhoneAdapter = Annotated[PhoneOtpSender, Depends(get_phone_otp_sender)]
+
+
+@router.post("/phone/request", response_model=PhoneChallengeResponse, status_code=202)
+async def phone_request(
+    payload: PhoneCodeRequest,
+    request: Request,
+    _origin: TrustedOrigin,
+    session: DatabaseSession,
+    settings: RuntimeSettings,
+    sender: PhoneAdapter,
+    limiter: Limiter,
+) -> PhoneChallengeResponse:
+    if not settings.whatsapp_otp_enabled:
+        raise HTTPException(503, WHATSAPP_UNAVAILABLE)
+    await _enforce(
+        limiter,
+        "phone-otp-request",
+        (
+            RateLimitRule(_client_identifier(request), limit=10, window_seconds=900),
+            RateLimitRule(payload.phone, limit=5, window_seconds=3600),
+        ),
+    )
+    try:
+        issue = await issue_phone_challenge(
+            session,
+            settings,
+            sender,
+            phone=payload.phone,
+            purpose=payload.purpose,
+            display_name=payload.display_name,
+        )
+    except PhoneOtpCooldownError as error:
+        raise HTTPException(
+            429,
+            "Please wait before requesting another code.",
+            headers={"Retry-After": str(error.retry_after)},
+        ) from None
+    except PhoneOtpDeliveryError as error:
+        logger.error(
+            "identity.phone_otp_delivery_failed",
+            extra={"reason": error.reason, "request_id": _request_id(request)},
+        )
+        if error.reason == "unreachable_number":
+            raise HTTPException(
+                422,
+                "This number could not receive a WhatsApp code. Check the number and try again.",
+            ) from None
+        raise HTTPException(503, WHATSAPP_UNAVAILABLE) from None
+    return PhoneChallengeResponse(
+        challenge=issue.challenge,
+        expiresInSeconds=issue.expires_in_seconds,
+        resendAfterSeconds=issue.resend_after_seconds,
+    )
+
+
+@router.post("/phone/verify", response_model=AuthenticatedUserResponse)
+async def phone_verify(
+    payload: PhoneCodeVerifyRequest,
+    request: Request,
+    response: Response,
+    _origin: TrustedOrigin,
+    session: DatabaseSession,
+    settings: RuntimeSettings,
+    limiter: Limiter,
+) -> AuthenticatedUserResponse:
+    if not settings.whatsapp_otp_enabled:
+        raise HTTPException(503, WHATSAPP_UNAVAILABLE)
+    await _enforce(limiter, "phone-otp-verify", _token_rules(request, payload.challenge))
+    try:
+        issue = await verify_phone_challenge(
+            session,
+            settings,
+            raw_challenge=payload.challenge,
+            code=payload.code,
+            user_agent=request.headers.get("User-Agent"),
+            request_id=_request_id(request),
+        )
+    except InvalidPhoneCodeError:
+        raise HTTPException(400, "The code is invalid or has expired.") from None
+    except PhoneAccountNotFoundError:
+        raise HTTPException(
+            404, "No account uses this number yet. Create an account to continue."
+        ) from None
+    except PhoneVerificationConflictError:
+        raise HTTPException(409, "Please try again.") from None
+    set_session_cookies(response, issue, settings)
+    return AuthenticatedUserResponse(
+        id=issue.user_id,
+        email=issue.email,
+        phone=issue.phone_e164,
+        displayName=issue.display_name,
+        role=issue.role,
+    )
 
 
 def _request_id(request: Request) -> str | None:
@@ -276,6 +384,7 @@ async def create_session(
     return AuthenticatedUserResponse(
         id=issue.user_id,
         email=issue.email,
+        phone=issue.phone_e164,
         displayName=issue.display_name,
         role=issue.role,
     )
@@ -316,6 +425,7 @@ async def complete_mfa_session(
     return AuthenticatedUserResponse(
         id=issue.user_id,
         email=issue.email,
+        phone=issue.phone_e164,
         displayName=issue.display_name,
         role=issue.role,
     )
@@ -404,6 +514,7 @@ async def current_user(user: CurrentUser) -> AuthenticatedUserResponse:
     return AuthenticatedUserResponse(
         id=user.id,
         email=user.email,
+        phone=user.phone_e164,
         displayName=user.display_name,
         role=user.role,
     )

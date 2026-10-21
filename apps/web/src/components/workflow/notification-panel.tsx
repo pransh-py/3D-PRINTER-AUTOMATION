@@ -32,8 +32,8 @@ export function NotificationPanel() {
   return (
     <section aria-label="Notification delivery">
       <h2>Email delivery</h2>
-      <p>Messages contain a status notice and sign-in link, not private model or payment details. Sent means the mail server accepted it, not inbox delivery.</p>
-      {enabled === false ? <p className={styles.boundary}>Workflow email is disabled. Configure and approve the sender before enabling it. Identity verification and password reset email are separate.</p> : null}
+      <p>Emails contain a status update and sign-in link, never model or payment details. “Sent” means our mail server accepted it.</p>
+      {enabled === false ? <p className={styles.boundary}>Status emails are turned off. Set up and approve a sender to turn them on. Sign-in and password emails are separate.</p> : null}
       <button disabled={busy} onClick={() => void refresh()}>Refresh notices</button>
       {error ? <p role="alert" className={styles.error}>{error}</p> : null}
       {enabled !== null && rows.length === 0 ? <p>No delivery records yet.</p> : null}

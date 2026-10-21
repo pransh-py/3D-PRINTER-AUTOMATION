@@ -17,8 +17,6 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from xxx_worker.slicing import SliceResult
-
 from services.bridge.ad5x_lan import AD5XLan, PrinterError, PrinterStatus, Slot
 from services.bridge.moonraker_lan import MoonrakerLan
 from services.bridge.print_station import (
@@ -34,6 +32,7 @@ from services.bridge.print_station import (
     private_lan_ipv4,
 )
 from services.bridge.zmod_gcode import prepare_zmod_gcode
+from xxx_worker.slicing import SliceResult
 
 
 @contextmanager

@@ -15,12 +15,14 @@ from xxx_api.database import create_database_engine, create_session_factory
 from xxx_api.email import SmtpEmailSender
 from xxx_api.http import AuthResponseSecurityMiddleware, RequestContextMiddleware
 from xxx_api.logging import configure_logging
+from xxx_api.phone_otp import OtpigeonWhatsAppSender
 from xxx_api.rate_limit import RedisRateLimiter
 from xxx_api.razorpay import GatewayUnavailableError, HttpRazorpayGateway
 from xxx_api.routes.auth import router as auth_router
 from xxx_api.routes.bridge import router as bridge_router
 from xxx_api.routes.catalogue import router as catalogue_router
 from xxx_api.routes.commerce import router as commerce_router
+from xxx_api.routes.dashboard import router as dashboard_router
 from xxx_api.routes.health import router as health_router
 from xxx_api.routes.notifications import router as notifications_router
 from xxx_api.routes.payments import router as payments_router
@@ -64,6 +66,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.redis = redis_client
     app.state.rate_limiter = RedisRateLimiter(redis_client, runtime_settings)
     app.state.email_sender = SmtpEmailSender(runtime_settings)
+    app.state.phone_otp_sender = OtpigeonWhatsAppSender(runtime_settings)
     app.state.object_storage = create_object_storage(runtime_settings)
     app.state.payment_gateway = HttpRazorpayGateway(runtime_settings)
     app.add_middleware(RequestContextMiddleware)
@@ -80,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(catalogue_router, prefix=runtime_settings.api_prefix)
     app.include_router(pricing_router, prefix=runtime_settings.api_prefix)
     app.include_router(commerce_router, prefix=runtime_settings.api_prefix)
+    app.include_router(dashboard_router, prefix=runtime_settings.api_prefix)
     app.include_router(bridge_router, prefix=runtime_settings.api_prefix)
     app.include_router(payments_router, prefix=runtime_settings.api_prefix)
     app.include_router(notifications_router, prefix=runtime_settings.api_prefix)

@@ -47,11 +47,17 @@
 .account:hover {
   color: var(--link);
 }
+.account[aria-current] {
+  text-decoration: underline;
+  text-underline-offset: 8px;
+}
 .desktopNav a[aria-current] {
   text-decoration: underline;
   text-underline-offset: 8px;
 }
 .cta {
+  white-space: nowrap;
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -116,11 +122,6 @@
   .actions {
     gap: 20px;
   }
-  .account {
-    display: none;
-  }
-}
-@media (max-width: 780px) {
   .bar {
     width: calc(100% - 40px);
     min-height: 78px;
@@ -166,6 +167,32 @@
     align-items: center;
     padding: 16px 8px;
     font-size: 16px;
+  }
+}
+@media (max-width: 780px) {
+  .account {
+    display: none;
+  }
+}
+@media (max-width: 420px) {
+  .bar {
+    width: calc(100% - 32px);
+    gap: 8px;
+  }
+  .brand {
+    font-size: 20px;
+    gap: 7px;
+  }
+  .cta {
+    padding: 0 11px;
+    font-size: 12px;
+  }
+  .cta svg {
+    display: none;
+  }
+  .menuButton {
+    flex-shrink: 0;
+    width: 40px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -12,7 +12,7 @@ export default function AccountPage() {
     <AuthShell
       kicker="YOUR ACCOUNT"
       title="Account overview."
-      description="This page checks your protected browser session with the account service."
+      description="Manage your account and security."
       footerLinks={[{ label: "Back to home", href: "/" }]}
     >
       <AccountPanel />

@@ -134,7 +134,7 @@ export function OwnerMfaPanel() {
     <section className={styles.securityPanel}>
       <h2>Secure the owner account</h2>
       <p className={styles.help}>
-        Owner MFA must be enabled before payment verification or printer controls can launch.
+        Turn on authenticator sign-in before managing payments, pricing or the printer.
       </p>
       {enrollment === null ? (
         <form className={styles.form} onSubmit={handleStart}>

@@ -102,7 +102,9 @@ def _display_name(value: str) -> str:
     return normalized
 
 
-async def _password_matches(password: str, encoded_hash: str) -> bool:
+async def _password_matches(password: str, encoded_hash: str | None) -> bool:
+    if encoded_hash is None:
+        return False
     if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
         return False
     return await to_thread.run_sync(verify_password, password, encoded_hash)
@@ -229,6 +231,8 @@ async def start_owner_mfa_enrollment(
         request_id=request_id,
     )
     await session.commit()
+    if principal.user.email is None:
+        raise MfaConfigurationError
     return OwnerMfaEnrollment(
         secret=secret,
         provisioning_uri=totp_provisioning_uri(

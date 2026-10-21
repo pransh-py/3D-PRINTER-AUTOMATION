@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-
 import { QuoteRequestPanel } from "@/components/quotes/quote-request-panel";
+import { SiteHeader } from "@/components/site-header";
+import styles from "@/components/quotes/quote-request.module.css";
 
 export const metadata: Metadata = {
   title: "Get a quote",
@@ -9,23 +9,19 @@ export const metadata: Metadata = {
 
 export default function GetAQuotePage() {
   return (
-    <main className="form-shell">
-      <Link className="wordmark" href="/">
-        PrintFlow <span>3D</span>
-      </Link>
-      <section className="form-card">
-        <p className="section-kicker">QUOTE REQUEST</p>
-        <h1>Start with your model</h1>
-        <p>
-          Upload your model, choose a material and print settings, then request
-          a quotation. Your files stay private. Review the owner-confirmed price
-          before you pay.
-        </p>
+    <>
+      <SiteHeader />
+      <main id="main-content" tabIndex={-1} className={styles.page}>
+        <header className={styles.intro}>
+          <p className={styles.label}>YOUR FILE. YOUR NEXT PRINT.</p>
+          <h1>Let’s make your model.</h1>
+          <p>
+            Upload, configure and review. We’ll check your models and send a
+            final price before you pay.
+          </p>
+        </header>
         <QuoteRequestPanel />
-        <Link className="button" href="/">
-          Back to home
-        </Link>
-      </section>
-    </main>
+      </main>
+    </>
   );
 }

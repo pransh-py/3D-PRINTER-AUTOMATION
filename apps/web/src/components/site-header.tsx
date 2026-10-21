@@ -2,12 +2,25 @@
 
 import Link from "next/link";
 import { useRef, useState } from "react";
+import { printEntry } from "@/lib/print-entry";
 import { UiIcon } from "./ui-icon";
 import styles from "./site-header.module.css";
 
-export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
+export function SiteHeader({
+  workspace = false,
+  dashboard,
+  startHref = printEntry(),
+}: {
+  workspace?: boolean;
+  dashboard?: "buyer" | "owner";
+  startHref?: "/get-a-quote" | "/print";
+}) {
   const [open, setOpen] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
+  const account =
+    dashboard === "owner"
+      ? { label: "Owner dashboard", href: "/operations" }
+      : { label: "My orders", href: "/orders" };
   const links = workspace
     ? [
         { label: "Configure print", href: "/print" },
@@ -63,11 +76,15 @@ export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
           ))}
         </nav>
         <div className={styles.actions}>
-          <Link className={styles.account} href="/orders">
-            My orders
+          <Link
+            className={styles.account}
+            href={account.href}
+            aria-current={dashboard ? "page" : undefined}
+          >
+            {account.label}
           </Link>
           {!workspace && (
-            <Link className={styles.cta} href="/print">
+            <Link className={styles.cta} href={startHref}>
               Start a print <UiIcon name="arrow-up" />
             </Link>
           )}
@@ -101,8 +118,12 @@ export function SiteHeader({ workspace = false }: { workspace?: boolean }) {
               <UiIcon name="arrow" />
             </Link>
           ))}
-          <Link href="/orders" onClick={() => setOpen(false)}>
-            My orders
+          <Link
+            href={account.href}
+            onClick={() => setOpen(false)}
+            aria-current={dashboard ? "page" : undefined}
+          >
+            {account.label}
             <UiIcon name="arrow" />
           </Link>
           <Link href="/#faq" onClick={() => setOpen(false)}>

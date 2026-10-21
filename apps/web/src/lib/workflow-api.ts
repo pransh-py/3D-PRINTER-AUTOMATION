@@ -188,7 +188,7 @@ function destination(value: unknown): value is Address | null {
   );
 }
 
-async function request(path: string, body?: unknown): Promise<unknown> {
+export async function request(path: string, body?: unknown): Promise<unknown> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (body !== undefined) {
     const csrf = readCsrfCookie(document.cookie);
@@ -520,6 +520,36 @@ export const revokeBridge = (id: string) =>
   request(`/owner/bridges/${id}/revoke`, {});
 export const authorizeHandoff = (id: string, expectedVersion: number) =>
   request(`/owner/production/${id}/handoff`, { expectedVersion });
+
+export type StationDispatch = Readonly<{
+  eligible: boolean;
+  reason: string | null;
+  enabled: boolean;
+  online: boolean;
+  bridgeName: string | null;
+  adapter: string | null;
+  lastHeartbeatAt: string | null;
+  authorization: { id: string; expiresAt: string; claimedAt: string | null; revokedAt: string | null } | null;
+  events: readonly { state: string; at: string; progressBps: number | null; refusalCode: string | null }[];
+}>;
+export async function getStationDispatch(id: string): Promise<StationDispatch> {
+  if (!uuid(id)) return invalid();
+  const value = await request(`/owner/production/${id}/dispatch`);
+  if (!record(value) || typeof value.eligible !== "boolean" || typeof value.enabled !== "boolean"
+      || typeof value.online !== "boolean" || !nullableText(value.reason)
+      || !nullableText(value.bridgeName) || !nullableText(value.adapter)
+      || !nullableTimestamp(value.lastHeartbeatAt) || !Array.isArray(value.events)
+      || value.events.some((row) => !record(row) || typeof row.state !== "string"
+          || !timestamp(row.at) || !nullableText(row.refusalCode)
+          || !(row.progressBps === null || (integer(row.progressBps) && row.progressBps >= 0 && row.progressBps <= 10000)))
+      || !(value.authorization === null || (record(value.authorization)
+          && uuid(value.authorization.id) && timestamp(value.authorization.expiresAt)
+          && nullableTimestamp(value.authorization.claimedAt)
+          && nullableTimestamp(value.authorization.revokedAt)))) return invalid();
+  return value as StationDispatch;
+}
+export const authorizeStationDispatch = (id: string, expectedVersion: number) =>
+  request(`/owner/production/${id}/dispatch`, { expectedVersion });
 export async function listBridges(): Promise<
   readonly {
     id: string;
